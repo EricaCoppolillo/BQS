@@ -15,6 +15,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from evaluation import compute_metric
+
 np.random.seed(SEED)
 random.seed(SEED)
 
@@ -22,7 +24,8 @@ torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 USE_CUDA = True
 
@@ -566,82 +569,6 @@ def y_custom(popularity, position, cutoff):
     return y
 
 
-def compute_metric(x, y, pos, neg, popularity, popularity_thresholds, top_k=10):
-    """
-    Compute metric:
-    - hitrate
-    - hitrate per popularity
-
-    :param x: user preferences, BS x items
-    :param y: user predictions, BS x items
-    :param mask: user selected preferences, BS x 100
-    :param popularity: dict of item popularity (normalized)
-    :param top_k: top k items to select ranked by score
-    :return: hitrate, popularity hitrate, total_positives(low,medium,high)
-    """
-    assert min([len(r) for r in neg]) >= top_k and top_k > 0, f"fail with top_k = {top_k} and neg = {[len(r) for r in neg]}"
-    assert len(popularity) == y.shape[-1], f'{len(popularity)} != {y.shape[-1]}'
-    avg_hr = 0
-    total_positives = np.zeros(3)
-    avg_hits = np.zeros(3)
-
-    for i in range(y.shape[0]):
-        input_idx = np.where(x[i, :] == 1)[0]
-        score = y[i, :]
-
-        viewed_item = set(input_idx)
-        # print('LC > viewed_item:',viewed_item)
-        positive_items = set(pos[i])
-        negative_items = neg[i]
-        neg_scores = sorted(score[negative_items].tolist(), reverse=True)
-
-        # Tutti i positivi predetti meno quelli visti
-        predicted_item = positive_items - viewed_item
-        hit = 0
-        hit_pop = [0, 0, 0]
-        hit_pop_tot = [0, 0, 0]
-
-        for pos_item in predicted_item:
-            score_pos = score[pos_item]
-
-            score_top_k = neg_scores[top_k - 1]
-
-            if score_pos > score_top_k:
-                hit += 1
-
-            # popularity
-            current_popularity = popularity[pos_item]
-
-            if current_popularity <= popularity_thresholds[0]:
-
-                hit_pop_tot[0] += 1
-                if score_pos > score_top_k:
-                    hit_pop[0] += 1
-
-            elif popularity_thresholds[0] < current_popularity <= popularity_thresholds[1]:
-
-                hit_pop_tot[1] += 1
-                if score_pos > score_top_k:
-                    hit_pop[1] += 1
-
-            else:  # current_popularity > popularity_thresholds[1]
-
-                hit_pop_tot[2] += 1
-                if score_pos > score_top_k:
-                    hit_pop[2] += 1
-
-        assert hit <= len(predicted_item), f'{hit} / {len(predicted_item)}'
-        assert sum(hit_pop) == hit, f'hit count error {hit} != {hit_pop}'
-        assert len(predicted_item) == sum(hit_pop_tot), f'hit count error {len(predicted_item)} != {hit_pop_tot}'
-        # avg_hr += hit / len(predicted_item)
-        # avg_hits += np.array([a / b if a > 0 else 0 for a, b in zip(hit_pop, hit_pop_tot)])
-        avg_hr += hit
-        avg_hits += np.array(hit_pop)
-        total_positives += np.array(hit_pop_tot)
-
-    return avg_hr, avg_hits, total_positives
-
-
 class MultiVAE(nn.Module):
     """
     Container module for Multi-VAE.
@@ -1121,9 +1048,10 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
                                      popularity,
                                      dataloader.thresholds,
                                      k)
-                hitrate, popularity_hitrate, total_items = out
+                hitrate, popularity_hitrate, total_items, weighted_hr = out
 
                 result[f'hitrate@{k}'] += hitrate
+                result[f'weighted_hr@{k}'] += weighted_hr
                 result[f'popularity_hitrate@{k}'] += popularity_hitrate
                 # aggiornamento vettore del numero di items ripartiti per popolarita (l, m, h)
                 if k == top_k[0]:
@@ -1134,6 +1062,7 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     for i, k in enumerate(top_k):
         # result[f'hitrate@{k}'] = result[f'hitrate@{k}'] / n_users_train
         result[f'hitrate@{k}'] = result[f'hitrate@{k}'] / n_positives_predicted.sum()
+        result[f'weighted_hr@{k}'] = result[f'weighted_hr@{k}'] / n_positives_predicted.sum()
 
         hits = result[f'popularity_hitrate@{k}']
         # result[f'popularity_hitrate@{k}'] = np.around(np.array(hits) / np.array(n_users_pop), 2)
