@@ -1,3 +1,10 @@
+'''
+modelli addestrati con:
+epoche = 50
+n_coppie = 4
+uso_frequenze = si
+'''
+
 SEED = 8734
 
 import collections
@@ -55,7 +62,6 @@ result_dir = os.path.join(data_dir, 'results')
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
-# TODO: include learning params
 file_model = os.path.join(result_dir, 'best_model.pth')
 file_train = os.path.join(proc_dir, 'train_glob')
 
@@ -81,23 +87,30 @@ def load_dataset(fname, to_pickle=True):
 
 
 class DataLoader:
-    def __init__(self, data_dir, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000):
+    def __init__(self, data_dir, pos_neg_ratio=1, negatives_in_test=100, use_popularity=False, chunk_size=1000):
         # loading models
         print('loading ensemble models...')
-        baseline_dir = os.path.join(data_dir, 'baseline')
-        popularity_dir = os.path.join(data_dir, 'popularity_low')
+        # low_dir = os.path.join(data_dir, 'popularity_low_pos_neg_filter')
+        low_dir = os.path.join(data_dir, 'popularity_low')
+        med_dir = os.path.join(data_dir, 'popularity_med')
+        high_dir = os.path.join(data_dir, 'popularity_high')
 
-        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
-        popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
+        low_file_model = os.path.join(low_dir, 'best_model.pth')
+        med_file_model = os.path.join(med_dir, 'best_model.pth')
+        high_file_model = os.path.join(high_dir, 'best_model.pth')
 
-        with open(baseline_file_model, 'rb') as f:
-            self.baseline_model = torch.load(f)
+        with open(low_file_model, 'rb') as f:
+            self.low_model = torch.load(f)
 
-        with open(popularity_file_model, 'rb') as f:
-            self.popularity_model = torch.load(f)
+        with open(med_file_model, 'rb') as f:
+            self.med_model = torch.load(f)
 
-        self.baseline_model.eval()
-        self.popularity_model.eval()
+        with open(high_file_model, 'rb') as f:
+            self.high_model = torch.load(f)
+
+        self.low_model.eval()
+        self.med_model.eval()
+        self.high_model.eval()
         print('ensemble models loaded!')
 
         dataset_file = os.path.join(data_dir, 'data_rvae')
@@ -399,10 +412,11 @@ class DataLoader:
         for batch_idx, (x, pos, neg, mask) in enumerate(self.iter(batch_size=batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
 
-            y_a, _, _ = self.baseline_model(x_tensor, True)
-            y_b, _, _ = self.popularity_model(x_tensor, True)
+            y_a, _, _ = self.low_model(x_tensor, True)
+            y_b, _, _ = self.med_model(x_tensor, True)
+            y_c, _, _ = self.high_model(x_tensor, True)
 
-            yield x, pos, neg, mask, y_a, y_b
+            yield x, pos, neg, mask, y_a, y_b, y_c
 
     def iter(self, batch_size=256, tag='train'):
         """
@@ -441,10 +455,11 @@ class DataLoader:
 
             x_input = x_tensor * (1 - mask_te_tensor)
 
-            y_a, _, _ = self.baseline_model(x_input, True)
-            y_b, _, _ = self.popularity_model(x_input, True)
+            y_a, _, _ = self.low_model(x_input, True)
+            y_b, _, _ = self.med_model(x_input, True)
+            y_c, _, _ = self.high_model(x_input, True)
 
-            yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b
+            yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b, y_c
 
     def iter_test(self, batch_size=256, tag='test'):
         """
@@ -745,132 +760,81 @@ class MultiVAE(nn.Module):
             layer.bias.data.normal_(0.0, 0.001)
 
 
+import matplotlib.pyplot as plt
+
+
 class EnsembleMultiVAE(nn.Module):
 
-    def __init__(self, n_items):
+    def __init__(self, popularity, thresholds):
         super(EnsembleMultiVAE, self).__init__()
-        self.n_items = n_items
 
-        # self.layers = nn.ModuleList((nn.Linear(n_items * 4, n_items * 3),
-        #                             nn.Linear(n_items * 3, n_items * 2),
-        #                             nn.Linear(n_items * 2, n_items)))
+        self.n_items = len(popularity)
+        self.thresholds = thresholds
+        self.popularity = popularity
 
-        self.layers = nn.ModuleList((nn.Linear(n_items * 5, n_items * 4),
-                                     nn.Linear(n_items * 4, n_items * 3),
-                                     nn.Linear(n_items * 3, n_items * 2),
-                                     nn.Linear(n_items * 2, n_items)))
+        self.popularity_tensor = torch.tensor(popularity, dtype=torch.float32, device=device)
 
-        self.init_weights()
+        print('n_items:', n_items)
+        print('thresholds:', thresholds)
 
-        self.s1 = torch.nn.Softmax(dim=1)
-        self.s2 = torch.nn.Softmax(dim=1)
-        self.s3 = torch.nn.Softmax(dim=1)
-        self.s4 = torch.nn.Softmax(dim=1)
+        self.min_a = torch.nn.Parameter(torch.tensor(-6.0, dtype=torch.float32, device=device))
+        self.max_a = torch.nn.Parameter(torch.tensor(4.0, dtype=torch.float32, device=device))
+        self.min_b = torch.nn.Parameter(torch.tensor(-8.0, dtype=torch.float32, device=device))
+        self.max_b = torch.nn.Parameter(torch.tensor(4.0, dtype=torch.float32, device=device))
+        self.min_c = torch.nn.Parameter(torch.tensor(-2.0, dtype=torch.float32, device=device))
+        self.max_c = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32, device=device))
 
-        self.log_sigmoid = torch.nn.LogSigmoid()
+        self.linear_a_0 = nn.Linear(n_items * 3, n_items)
+        self.linear_b_0 = nn.Linear(n_items * 3, n_items)
+        self.linear_c_0 = nn.Linear(n_items * 3, n_items)
 
-    def normalize(self, tensor):
-        min_v = torch.min(tensor)
-        range_v = torch.max(tensor) - min_v
-        if range_v > 0:
-            normalised = (tensor - min_v) / range_v
-        else:
-            normalised = torch.zeros(tensor.size())
+        self.linear_a_1 = nn.Linear(n_items, n_items)
+        self.linear_b_1 = nn.Linear(n_items, n_items)
+        self.linear_c_1 = nn.Linear(n_items, n_items)
+
+        self.linear_e_0 = nn.Linear(n_items * 4, n_items)
+
+    def normalize(self, tensor, min_v, max_v):
+        range_v = max_v - min_v
+
+        normalised = (tensor - min_v) / range_v
+
         return normalised
 
-    def forward(self, x, popularity, y_a, y_b, predict=False):
-        # print('popularity.repeat(x.size()[0], 1).size():',popularity.repeat(x.size()[0], 1).size())
-        # print('popularity.repeat(x.size()[0], 1):', popularity.repeat(x.size()[0], 1))
+    def forward(self, x, y_a, y_b, y_c, predict=False):
+        print('Range A: [', self.min_a.item(), ', ', self.max_a.item(), ']', sep='')
+        print('Range B: [', self.min_b.item(), ', ', self.max_b.item(), ']', sep='')
+        print('Range C: [', self.min_c.item(), ', ', self.max_c.item(), ']', sep='')
 
-        '''
-        y_e = torch.cat((x, popularity.repeat(x.size()[0], 1), y_a, y_b, y_c), 1)
+        p = self.popularity_tensor.repeat(x.size()[0], 1)
 
-        for _, layer in enumerate(self.layers):
-            y_e = layer(y_e)
+        z_a = self.normalize(y_a, self.min_a, self.max_a)
+        z_b = self.normalize(y_b, self.min_b, self.max_b)
+        z_c = self.normalize(y_c, self.min_c, self.max_c)
 
+        z_a = torch.cat((x, p, z_a), 1)
+        z_b = torch.cat((x, p, z_b), 1)
+        z_c = torch.cat((x, p, z_c), 1)
 
-        n_a = self.normalize(self.s1(y_a))
-        n_b = self.normalize(self.s2(y_b))
-        n_c = self.normalize(self.s3(y_c))
-        '''
+        z_a = self.linear_a_0(z_a)
+        z_b = self.linear_b_0(z_b)
+        z_c = self.linear_c_0(z_c)
 
-        zeros = torch.zeros(y_a.size()).to(device)
-        ones = torch.ones(y_a.size()).to(device)
+        z_a = torch.tanh(z_a)
+        z_b = torch.tanh(z_b)
+        z_c = torch.tanh(z_c)
 
-        t_min = 0.30
-        t_max = 0.80
+        z_a = self.linear_a_1(z_a)
+        z_b = self.linear_b_1(z_b)
+        z_c = self.linear_c_1(z_c)
 
-        # n_a = self.s1(y_a * (1 - x))
-        # n_b = self.s1(y_b * (1 - x))
-        # n_c = self.s1(y_c * (1 - x))
+        z_e = torch.cat((p, z_a, z_b, z_c), 1)
 
-        # n_a = self.s1(self.normalize(self.s1(self.normalize(y_a))))
-        # n_b = self.s1(self.normalize(self.s1(self.normalize(y_b))))
-        # n_a = self.s1(self.normalize(self.s1(self.normalize(y_a))))
-        # n_b = self.s1(self.normalize(self.s1(self.normalize(y_b))))
-        z_a = y_a
-        z_b = y_b
+        y_e = self.linear_e_0(z_e)
 
-        #n_a = self.normalize(self.s1(y_a))
-        #n_b = self.normalize(self.s1(y_b))
+        # y_e = z_a + z_b + z_c
 
-
-        z_a = torch.softmax(z_a, 1)
-        z_b = torch.softmax(z_b, 1)
-
-        # n_a = self.s1(self.normalize(y_a))
-        # n_b = self.s1(self.normalize(y_b))
-
-        # n_a = self.normalize(y_a)
-        # n_b = self.normalize(y_b)
-
-        # n_a = self.s1(y_a)
-        # n_b = self.s2(y_b)
-
-        # n_c = self.s1(self.normalize(self.s1(self.normalize(y_c))))
-
-        # n_a = self.normalize(y_a* (1 - x))
-        # n_b = self.normalize(y_b* (1 - x))
-        # n_c = self.normalize(y_c* (1 - x))
-
-        # n_a = torch.where(t_min > n_a, zeros, n_a)
-        # n_b = torch.where(t_min > n_b, zeros, n_b)
-        # n_c = torch.where(t_min > n_c, zeros, n_c)
-
-        # n_a = torch.where(n_a > t_max, zeros, n_a)
-        # n_b = torch.where(n_b > t_max, zeros, n_b)
-        # n_c = torch.where(n_c > t_max, zeros, n_c)
-
-        # n_a = self.s1(y_a*(1-x))
-        # n_b = self.s2(y_b*(1-x))
-        # n_c = self.s3(y_c*(1-x))
-
-        # n_a = self.s1(y_a)
-        # n_b = self.s2(y_b)
-        # n_c = self.s3(y_c)
-
-        # print(x[0, :100])
-        # print(n_a[0, :100])
-        # print(y_b[0, :10])
-        # print(y_c[0, :10])
-
-        # print('ya min', torch.min(n_a))
-        # print('ya max', torch.max(n_a))
-
-        # print('yb min', torch.min(n_b))
-        # print('yb max', torch.max(n_b))
-
-        # print('yc min', torch.min(n_c))
-        # print('yc max', torch.max(n_c))
-
-        #y_e = n_a + n_b
-        #y_e = torch.where(y_e > 1, ones, y_e)
-
-        #y_e = torch.max(z_a, z_b)
-        y_e = z_a + z_b
-        #y_e = torch.max(y_e, z_c)
-
-        return y_e
+        return y_c
 
     def init_weights(self):
         for layer in self.layers:
@@ -983,8 +947,8 @@ class rvae_focal_loss(rvae_loss):
 
 """# Train and test"""
 
-trainloader = DataLoader(data_dir, use_popularity=False)
-# dataloader = DataLoaderDummy(None)
+trainloader = DataLoader(data_dir, use_popularity=True)
+
 n_items = trainloader.n_items
 
 # SETTINGS
@@ -1037,13 +1001,14 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
-    for batch_idx, (x, pos, neg, mask, y_a, y_b) in enumerate(dataloader.iter_ensemble(batch_size=settings.batch_size)):
+    for batch_idx, (x, pos, neg, mask, y_a, y_b, y_c) in enumerate(dataloader.iter_ensemble(batch_size=settings.batch_size)):
         # for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=settings.batch_size)):
 
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
         mask = naive_sparse2tensor(mask).to(device)
+        popularity = naive_sparse2tensor(dataloader.item_popularity).to(device)
 
         update_count += 1
         if settings.total_anneal_steps > 0:
@@ -1053,12 +1018,12 @@ def train(dataloader, epoch, optimizer):
 
         # TRAIN on batch
         optimizer.zero_grad()
-        # y, mu, logvar = model(x, y_a, y_b)
-        y = model(x, popularity, y_a, y_b)
+
+        y = model(x, y_a, y_b, y_c)
 
         loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask)
-        # loss.backward()
-        # optimizer.step()
+        loss.backward()
+        optimizer.step()
 
         train_loss += loss.item()
         train_loss_cumulative += loss.item()
@@ -1095,19 +1060,20 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b, y_c) in enumerate(dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
             mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
+            popularity = naive_sparse2tensor(dataloader.item_popularity).to(device)
 
             batch_num += 1
             n_users_train += x_tensor.shape[0]
 
             x_input = x_tensor * (1 - mask_te)
 
-            y = model(x_input, popularity, y_a, y_b, True)
+            y = model(x_input, y_a, y_b, y_c, True)
 
             loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
 
@@ -1149,16 +1115,17 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 # %%capture output
 torch.set_printoptions(profile="full")
 
-n_epochs = 1
+n_epochs = 200
 update_count = 0
 settings.batch_size = 1024  # 256
-settings.learning_rate = 1e-4  # 1e-5
+# settings.learning_rate = 1e-4  # 1e-5
+settings.learning_rate = 0.01  # 1e-5
 settings.optim = 'adam'
 settings.scale = 1000
 settings.use_popularity = True
 settings.p_dims = [200, 600, n_items]
 
-model = EnsembleMultiVAE(n_items)
+model = EnsembleMultiVAE(trainloader.item_popularity, trainloader.thresholds)
 
 model = model.to(device)
 

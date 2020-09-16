@@ -744,18 +744,30 @@ class MultiVAE(nn.Module):
             # Normal Initialization for Biases
             layer.bias.data.normal_(0.0, 0.001)
 
-
+import matplotlib.pyplot as plt
 class EnsembleMultiVAE(nn.Module):
 
-    def __init__(self, n_items):
+    def __init__(self, popularity, thresholds):
         super(EnsembleMultiVAE, self).__init__()
-        self.n_items = n_items
 
-        self.linear_a_1 = nn.Linear(n_items * 2, n_items)
-        self.linear_b_1 = nn.Linear(n_items * 2, n_items)
+        self.n_items = len(popularity)
+        self.thresholds = thresholds
+        self.popularity = popularity
+
+        print('n_items:', n_items)
+        print('thresholds:', thresholds)
+
+        self.linear_a_1 = nn.Linear(n_items * 3, n_items)
+        self.linear_b_1 = nn.Linear(n_items * 3, n_items)
 
         self.linear_a_2 = nn.Linear(n_items, n_items)
         self.linear_b_2 = nn.Linear(n_items, n_items)
+
+        self.linear_a_3 = nn.Linear(n_items, n_items)
+        self.linear_b_3 = nn.Linear(n_items, n_items)
+
+        self.linear_a_4 = nn.Linear(n_items, n_items)
+        self.linear_b_4 = nn.Linear(n_items, n_items)
 
         self.linear_e_1 = nn.Linear(n_items * 3, n_items)
         self.linear_e_2 = nn.Linear(n_items, n_items)
@@ -811,9 +823,32 @@ class EnsembleMultiVAE(nn.Module):
             normalised = torch.zeros(tensor.size())
         return normalised
 
-    def forward(self, x, popularity, y_a, y_b, predict=False):
+    def forward(self, x, y_a, y_b, predict=False):
+        # y_a: baseline
 
-        p = popularity.repeat(x.size()[0], 1)
+        self.zeros = torch.zeros(x.size()).to(device)
+        self.ones = torch.ones(x.size()).to(device)
+        self.minus_ones = -torch.ones(x.size()).to(device)
+
+        self.p = naive_sparse2tensor(popularity).to(device).repeat(x.size()[0], 1)
+        self.p_n = torch.where(self.p <= self.thresholds[0], self.minus_ones, self.p)
+        self.p_n = torch.where((self.p_n > self.thresholds[0]) & (self.p_n <= self.thresholds[1]), self.zeros, self.p_n)
+        self.p_n = torch.where(self.p_n > self.thresholds[1], self.ones, self.p_n)
+
+        values = y_b[0, :].cpu().detach().numpy()
+
+        sorted_index = values.argsort()
+        sorted_values = values[sorted_index]
+        pop_values = self.p_n[0, :].cpu().detach().numpy()[sorted_index]
+        selected_pop_values = x[0, :].cpu().detach().numpy()[sorted_index]
+
+        # print(type(values))
+        # print(values)
+
+        plt.plot(sorted_values)
+        plt.plot(pop_values)
+        plt.plot(selected_pop_values)
+        plt.show()
 
         z_a = y_a
         z_b = y_b
@@ -821,16 +856,31 @@ class EnsembleMultiVAE(nn.Module):
         z_a = torch.softmax(y_a, -1)
         z_b = torch.softmax(y_b, -1)
 
-        z_a = torch.cat((x, z_a), 1)
-        z_b = torch.cat((x, z_b), 1)
+        z_a = torch.cat((x, self.p_n, z_a), 1)
+        z_b = torch.cat((x, self.p_n, z_b), 1)
 
         z_a = self.linear_a_1(z_a)
         z_b = self.linear_b_1(z_b)
 
+        #z_a = torch.relu(z_a)
+        #z_b = torch.relu(z_b)
+
+        z_a = self.linear_a_2(z_a)
+        z_b = self.linear_b_2(z_b)
+
+        #z_a = torch.relu(z_a)
+        #z_b = torch.relu(z_b)
+
+        z_a = self.linear_a_3(z_a)
+        z_b = self.linear_b_3(z_b)
+
         z_a = torch.tanh(z_a)
         z_b = torch.tanh(z_b)
 
-        z_e = torch.cat((p, z_a, z_b), 1)
+        z_a = self.linear_a_4(z_a)
+        z_b = self.linear_b_4(z_b)
+
+        z_e = torch.cat((self.p_n, z_a, z_b), 1)
 
         z_e = self.linear_e_1(z_e)
 
@@ -936,7 +986,7 @@ class EnsembleMultiVAE(nn.Module):
         # y_e = self.bn2(y_e)
         y_e = self.linear_e_1(y_e)
 
-        return y_e
+        return y_a
 
     def init_weights(self):
         for layer in self.layers:
@@ -1121,7 +1171,7 @@ def train(dataloader, epoch, optimizer):
         # TRAIN on batch
         optimizer.zero_grad()
         # y, mu, logvar = model(x, y_a, y_b)
-        y = model(x, popularity, y_a, y_b)
+        y = model(x, y_a, y_b)
 
         loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask)
         loss.backward()
@@ -1175,7 +1225,7 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 
             x_input = x_tensor * (1 - mask_te)
 
-            y = model(x_input, popularity, y_a, y_b, True)
+            y = model(x_input, y_a, y_b, True)
 
             loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
 
@@ -1226,7 +1276,7 @@ settings.scale = 1000
 settings.use_popularity = True
 settings.p_dims = [200, 600, n_items]
 
-model = EnsembleMultiVAE(n_items)
+model = EnsembleMultiVAE(trainloader.item_popularity, trainloader.thresholds)
 
 model = model.to(device)
 

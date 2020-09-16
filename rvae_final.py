@@ -760,18 +760,26 @@ class rvae_rank_pair_loss(rvae_loss):
         y1 = torch.gather(y, 1, (pos_items).long()) * mask
         y2 = torch.gather(y, 1, (neg_items).long()) * mask
 
-        freq_pos = self.frequencies[pos_items.long()].float()
-        freq_neg = self.frequencies[neg_items.long()].float()
+        # freq_pos = self.frequencies[pos_items.long()].float()
+        # freq_neg = self.frequencies[neg_items.long()].float()
 
         pop_pos = self.popularity[pos_items.long()]
         pop_neg = self.popularity[neg_items.long()]
 
-        # filter = (pop_pos <= self.thresholds[0]).float()  # low
-        # filter = (self.thresholds[0] < pop_pos).float() * (pop_pos <= self.thresholds[1]).float()  # med
-        filter = (self.thresholds[1] <= pop_pos).float()  # high
+        filter_pos = (pop_pos <= self.thresholds[0]).float()  # low
+        filter_neg = (pop_neg > self.thresholds[0]).float()  # low
+        # filter_pos = (self.thresholds[0] < pop_pos).float() * (pop_pos <= self.thresholds[1]).float()  # med
+        # filter_pos = (self.thresholds[1] <= pop_pos).float()  # high
 
         # neg_ll = -torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
-        neg_ll = - torch.sum(filter * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        neg_ll = - torch.sum(filter_pos * filter_neg * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+
+        del pop_pos
+        del pop_neg
+        del filter_pos
+        del filter_neg
+
+        torch.cuda.empty_cache()
 
         return neg_ll
 

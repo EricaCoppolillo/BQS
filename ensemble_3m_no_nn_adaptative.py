@@ -1,3 +1,10 @@
+'''
+modelli addestrati con:
+epoche = 50
+n_coppie = 4
+uso_frequenze = si
+'''
+
 SEED = 8734
 
 import collections
@@ -55,7 +62,6 @@ result_dir = os.path.join(data_dir, 'results')
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
-# TODO: include learning params
 file_model = os.path.join(result_dir, 'best_model.pth')
 file_train = os.path.join(proc_dir, 'train_glob')
 
@@ -81,23 +87,30 @@ def load_dataset(fname, to_pickle=True):
 
 
 class DataLoader:
-    def __init__(self, data_dir, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000):
+    def __init__(self, data_dir, pos_neg_ratio=1, negatives_in_test=100, use_popularity=False, chunk_size=1000):
         # loading models
         print('loading ensemble models...')
-        baseline_dir = os.path.join(data_dir, 'baseline')
-        popularity_dir = os.path.join(data_dir, 'popularity_low')
+        # low_dir = os.path.join(data_dir, 'popularity_low_pos_neg_filter')
+        low_dir = os.path.join(data_dir, 'popularity_low')
+        med_dir = os.path.join(data_dir, 'popularity_med')
+        high_dir = os.path.join(data_dir, 'popularity_high')
 
-        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
-        popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
+        low_file_model = os.path.join(low_dir, 'best_model.pth')
+        med_file_model = os.path.join(med_dir, 'best_model.pth')
+        high_file_model = os.path.join(high_dir, 'best_model.pth')
 
-        with open(baseline_file_model, 'rb') as f:
-            self.baseline_model = torch.load(f)
+        with open(low_file_model, 'rb') as f:
+            self.low_model = torch.load(f)
 
-        with open(popularity_file_model, 'rb') as f:
-            self.popularity_model = torch.load(f)
+        with open(med_file_model, 'rb') as f:
+            self.med_model = torch.load(f)
 
-        self.baseline_model.eval()
-        self.popularity_model.eval()
+        with open(high_file_model, 'rb') as f:
+            self.high_model = torch.load(f)
+
+        self.low_model.eval()
+        self.med_model.eval()
+        self.high_model.eval()
         print('ensemble models loaded!')
 
         dataset_file = os.path.join(data_dir, 'data_rvae')
@@ -399,10 +412,11 @@ class DataLoader:
         for batch_idx, (x, pos, neg, mask) in enumerate(self.iter(batch_size=batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
 
-            y_a, _, _ = self.baseline_model(x_tensor, True)
-            y_b, _, _ = self.popularity_model(x_tensor, True)
+            y_a, _, _ = self.low_model(x_tensor, True)
+            y_b, _, _ = self.med_model(x_tensor, True)
+            y_c, _, _ = self.high_model(x_tensor, True)
 
-            yield x, pos, neg, mask, y_a, y_b
+            yield x, pos, neg, mask, y_a, y_b, y_c
 
     def iter(self, batch_size=256, tag='train'):
         """
@@ -441,10 +455,11 @@ class DataLoader:
 
             x_input = x_tensor * (1 - mask_te_tensor)
 
-            y_a, _, _ = self.baseline_model(x_input, True)
-            y_b, _, _ = self.popularity_model(x_input, True)
+            y_a, _, _ = self.low_model(x_input, True)
+            y_b, _, _ = self.med_model(x_input, True)
+            y_c, _, _ = self.high_model(x_input, True)
 
-            yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b
+            yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b, y_c
 
     def iter_test(self, batch_size=256, tag='test'):
         """
@@ -745,31 +760,45 @@ class MultiVAE(nn.Module):
             layer.bias.data.normal_(0.0, 0.001)
 
 
+import matplotlib.pyplot as plt
+
+
 class EnsembleMultiVAE(nn.Module):
 
-    def __init__(self, n_items):
+    def __init__(self, popularity, thresholds):
         super(EnsembleMultiVAE, self).__init__()
-        self.n_items = n_items
 
-        # self.layers = nn.ModuleList((nn.Linear(n_items * 4, n_items * 3),
-        #                             nn.Linear(n_items * 3, n_items * 2),
-        #                             nn.Linear(n_items * 2, n_items)))
+        self.n_items = len(popularity)
+        self.thresholds = thresholds
+        self.popularity = popularity
 
-        self.layers = nn.ModuleList((nn.Linear(n_items * 5, n_items * 4),
-                                     nn.Linear(n_items * 4, n_items * 3),
-                                     nn.Linear(n_items * 3, n_items * 2),
-                                     nn.Linear(n_items * 2, n_items)))
+        print('n_items:', n_items)
+        print('thresholds:', thresholds)
 
-        self.init_weights()
+        self.linear_a = nn.Linear(n_items * 3, n_items)
+        self.linear_b = nn.Linear(n_items * 3, n_items)
+        self.linear_c = nn.Linear(n_items * 3, n_items)
 
-        self.s1 = torch.nn.Softmax(dim=1)
-        self.s2 = torch.nn.Softmax(dim=1)
-        self.s3 = torch.nn.Softmax(dim=1)
-        self.s4 = torch.nn.Softmax(dim=1)
+        self.min_max_a = nn.Linear(n_items * 3, n_items)
+        self.min_max_b = nn.Linear(n_items * 3, n_items)
+        self.min_max_c = nn.Linear(n_items * 3, n_items)
 
-        self.log_sigmoid = torch.nn.LogSigmoid()
+        self.min_max_a_1 = nn.Linear(n_items, 2)
+        self.min_max_b_1 = nn.Linear(n_items, 2)
+        self.min_max_c_1 = nn.Linear(n_items, 2)
 
-    def normalize(self, tensor):
+        print('n_items:', n_items)
+        print('thresholds:', thresholds)
+
+        self.min_a = None
+        self.min_b = None
+        self.min_c = None
+
+        self.max_a = None
+        self.max_b = None
+        self.max_c = None
+
+    def normalize_old(self, tensor):
         min_v = torch.min(tensor)
         range_v = torch.max(tensor) - min_v
         if range_v > 0:
@@ -778,7 +807,230 @@ class EnsembleMultiVAE(nn.Module):
             normalised = torch.zeros(tensor.size())
         return normalised
 
-    def forward(self, x, popularity, y_a, y_b, predict=False):
+    def normalize(self, tensor, min_v, max_v):
+
+        range_v = max_v - min_v
+        if range_v > 0:
+            normalised = (tensor - min_v) / range_v
+        else:
+            normalised = torch.zeros(tensor.size())
+        return normalised
+
+    def forward_old(self, x, y_a, y_b, y_c, predict=False):
+
+        zeros = torch.zeros(x.size()).to(device)
+        ones = torch.ones(x.size()).to(device)
+        minus_ones = -torch.ones(x.size()).to(device)
+
+        p = naive_sparse2tensor(popularity).to(device).repeat(x.size()[0], 1)
+
+        p_n = torch.where(p <= thresholds[0], minus_ones, p)
+        p_n = torch.where((p_n > thresholds[0]) & (p_n <= thresholds[1]), zeros, p_n)
+        p_n = torch.where(p_n > thresholds[1], ones, p_n)
+
+        if self.min_a is None:
+            self.min_a = torch.min(y_a).item()
+        else:
+            self.min_a = min(self.min_a, torch.min(y_a).item())
+
+        if self.max_a is None:
+            self.max_a = torch.max(y_a).item()
+        else:
+            self.max_a = max(self.max_a, torch.max(y_a).item())
+
+        if self.min_b is None:
+            self.min_b = torch.min(y_b).item()
+        else:
+            self.min_b = min(self.min_b, torch.min(y_b).item())
+
+        if self.max_b is None:
+            self.max_b = torch.max(y_b).item()
+        else:
+            self.max_b = max(self.max_b, torch.max(y_b).item())
+
+        if self.min_c is None:
+            self.min_c = torch.min(y_c).item()
+        else:
+            self.min_c = max(self.min_c, torch.min(y_c).item())
+
+        if self.max_c is None:
+            self.max_c = torch.max(y_c).item()
+        else:
+            self.max_c = max(self.max_c, torch.max(y_c).item())
+
+        self.min_a = -6.0
+        self.max_a = 4.0
+        self.min_b = -15.0
+        self.max_b = 4.0
+        self.min_c = -2
+        self.max_c = 2.0
+
+        print('MIN A:', self.min_a)
+        print('MAX A:', self.max_a)
+        print('MIN B:', self.min_b)
+        print('MAX B:', self.max_b)
+        print('MIN C:', self.min_c)
+        print('MAX C:', self.max_c)
+        '''
+        min_value_a = torch.min(y_a, 1)[0]
+        max_value_a = torch.max(y_a, 1)[0]
+        min_value_b = torch.min(y_b, 1)[0]
+        max_value_b = torch.max(y_b, 1)[0]
+        min_value_c = torch.min(y_c, 1)[0]
+        max_value_c = torch.max(y_c, 1)[0]
+
+        print('>>min a,', min_value_a[:5])
+        print('>>max a,', max_value_a[:5])
+
+        print('>>min b,', min_value_b[:5])
+        print('>>max b,', max_value_b[:5])
+
+        print('>>min c,', min_value_c[:5])
+        print('>>max c,', max_value_c[:5])
+        '''
+
+        values = y_c[0, :].cpu().detach().numpy()
+
+        sorted_index = values.argsort()
+        sorted_values = values[sorted_index]
+        pop_values = p_n[0, :].cpu().detach().numpy()[sorted_index]
+        diff_sorted_values = sorted_values - np.roll(sorted_values, 1)
+        selected_pop_values = x[0, :].cpu().detach().numpy()[sorted_index]
+        t = sorted_values[np.argmax(diff_sorted_values)]
+        # print(type(values))
+        # print(values)
+        # print('>>>>> t:', t)
+        '''
+        plt.plot(sorted_values)
+        plt.plot(pop_values)
+        plt.plot(selected_pop_values)
+        # plt.plot(diff_sorted_values)
+        plt.axhline(y=t)
+        plt.show()
+        '''
+        z_a = y_a
+        z_b = y_b
+        z_c = y_c
+
+        z_a = self.normalize(y_a, self.min_a, self.max_a)
+        z_b = self.normalize(y_b, self.min_b, self.max_b)
+        z_c = self.normalize(y_c, self.min_c, self.max_c)
+
+        '''
+        z_a = torch.softmax(z_a, 1)
+        z_b = torch.softmax(z_b, 1)
+        z_c = torch.softmax(z_c, 1)
+        '''
+        # z_a = self.bn_a(z_a)
+        # z_b = self.bn_a(z_b)
+        # z_c = self.bn_a(z_c)
+
+        # z_a = self.normalize(z_a)
+        # z_b = self.normalize(z_b)
+        # z_c = self.normalize(z_c)
+
+        '''
+        k_a = torch.where(z_a == zeros, ones, z_a)
+        k_b = torch.where(z_b == zeros, ones, z_b)
+        k_c = torch.where(z_c == zeros, ones, z_c)
+
+        print('min k_a:', torch.min(k_a))
+        print('min k_b:', torch.min(k_b))
+        print('min k_c:', torch.min(k_c))
+        '''
+
+        t_a = 2
+        t_b = 0.1
+        t_c = 0.1
+
+        '''
+        z_a = torch.where(p > self.thresholds[0], zeros, z_a)
+        z_b = torch.where(p < self.thresholds[0], zeros, z_b)
+        z_b = torch.where(p >= self.thresholds[1], zeros, z_b)
+        z_c = torch.where(p < self.thresholds[1], zeros, z_c)
+
+
+        z_a = torch.where(z_a > t_a, z_a, zeros)
+        z_b = torch.where(z_b > t_b, z_b, zeros)
+        z_c = torch.where(z_c > t_c, z_c, zeros)
+'''
+        # z_a = self.normalize(z_a)
+        # z_b = self.normalize(z_b)
+        # z_c = self.normalize(z_c)
+
+        # print('z_a[0]:', z_a[0,:150])
+        # print('z_b[0]:', z_b[0,:150])
+        # print('z_c[0]:', z_c[0,:150])
+
+        # y_e = torch.max(z_a, z_b)
+        # y_e = torch.max(y_e, z_c)
+
+        # z_a = torch.softmax(z_a, 1)
+        # z_b = torch.softmax(z_b, 1)
+        # z_c = torch.softmax(z_c, 1)
+
+        y_e = z_a + z_b + z_c
+
+        return y_e
+
+    def norm(self, tensor, range):
+        min_t = torch.unsqueeze(range[:, 0], 1)
+        max_t = torch.unsqueeze(range[:, 1], 1)
+        range_v = max_t - min_t
+        '''
+        print('SHAPE', range.shape)
+        print('SHAPE T', tensor.shape)
+        print('SHAPE min_t', min_t.shape)
+        print('SHAPE max_t', max_t.shape)
+        print('SHAPE range_v', range_v.shape)
+        '''
+
+        normalised = (tensor - min_t) / range_v
+
+        '''
+        if range_v > 0:
+            normalised = (tensor - range[:, 1]) / range_v
+        else:
+            normalised = torch.zeros(tensor.size())
+        '''
+        return normalised
+
+    def forward(self, x, y_a, y_b, y_c, predict=False):
+
+        p = naive_sparse2tensor(self.popularity).to(device).repeat(x.size()[0], 1)
+
+        range_a = self.min_max_a(torch.cat((x, p, y_a), 1))
+        range_b = self.min_max_b(torch.cat((x, p, y_b), 1))
+        range_c = self.min_max_c(torch.cat((x, p, y_c), 1))
+        '''
+        range_a = self.min_max_a(x, p, y_a)
+        range_b = self.min_max_b(x, p, y_b)
+        range_c = self.min_max_c(x, p, y_c)
+        '''
+        range_a = torch.tanh(range_a)
+        range_b = torch.tanh(range_b)
+        range_c = torch.tanh(range_c)
+
+        range_a = self.min_max_a_1(range_a)
+        range_b = self.min_max_b_1(range_b)
+        range_c = self.min_max_c_1(range_c)
+        '''
+        print('MIN A:', self.min_a)
+        print('MAX A:', self.max_a)
+        print('MIN B:', self.min_b)
+        print('MAX B:', self.max_b)
+        print('MIN C:', self.min_c)
+        print('MAX C:', self.max_c)
+        '''
+        z_a = self.norm(y_a, range_a)
+        z_b = self.norm(y_b, range_b)
+        z_c = self.norm(y_c, range_c)
+
+        y_e = z_a + z_b + z_c
+
+        return y_e
+
+    def forward_old_2(self, x, popularity, y_a, y_b, y_c, predict=False):
         # print('popularity.repeat(x.size()[0], 1).size():',popularity.repeat(x.size()[0], 1).size())
         # print('popularity.repeat(x.size()[0], 1):', popularity.repeat(x.size()[0], 1))
 
@@ -794,6 +1046,7 @@ class EnsembleMultiVAE(nn.Module):
         n_c = self.normalize(self.s3(y_c))
         '''
 
+        p = popularity.repeat(x.size()[0], 1)
         zeros = torch.zeros(y_a.size()).to(device)
         ones = torch.ones(y_a.size()).to(device)
 
@@ -804,42 +1057,68 @@ class EnsembleMultiVAE(nn.Module):
         # n_b = self.s1(y_b * (1 - x))
         # n_c = self.s1(y_c * (1 - x))
 
-        # n_a = self.s1(self.normalize(self.s1(self.normalize(y_a))))
-        # n_b = self.s1(self.normalize(self.s1(self.normalize(y_b))))
-        # n_a = self.s1(self.normalize(self.s1(self.normalize(y_a))))
-        # n_b = self.s1(self.normalize(self.s1(self.normalize(y_b))))
-        z_a = y_a
-        z_b = y_b
-
-        #n_a = self.normalize(self.s1(y_a))
-        #n_b = self.normalize(self.s1(y_b))
-
-
-        z_a = torch.softmax(z_a, 1)
-        z_b = torch.softmax(z_b, 1)
-
-        # n_a = self.s1(self.normalize(y_a))
-        # n_b = self.s1(self.normalize(y_b))
-
-        # n_a = self.normalize(y_a)
-        # n_b = self.normalize(y_b)
-
-        # n_a = self.s1(y_a)
-        # n_b = self.s2(y_b)
-
-        # n_c = self.s1(self.normalize(self.s1(self.normalize(y_c))))
+        # n_a = self.normalize(self.s1(y_a))
+        # n_b = self.normalize(self.s1(y_b))
+        # n_c = self.normalize(self.s1(y_c))
 
         # n_a = self.normalize(y_a* (1 - x))
         # n_b = self.normalize(y_b* (1 - x))
         # n_c = self.normalize(y_c* (1 - x))
 
+        # n_a = self.normalize(y_a)
+        # n_b = self.normalize(y_b)
+        # n_c = self.normalize(y_c)
+
+        n_a = self.bn_a(y_a)
+        n_b = self.bn_b(y_b)
+        n_c = self.bn_c(y_c)
+
+        n_a = self.linear_a(torch.cat((x, p, n_a), 1))
+        n_b = self.linear_b(torch.cat((x, p, n_b), 1))
+        n_c = self.linear_c(torch.cat((x, p, n_c), 1))
+
+        n_a = self.d_a(n_a)
+        n_b = self.d_b(n_b)
+        n_c = self.d_c(n_c)
+
+        '''
+        n_a = self.bn_a(n_a)
+        n_b = self.bn_b(n_b)
+        n_c = self.bn_c(n_c)
+
+        
+        n_a = self.relu_a(n_a)
+        n_b = self.relu_b(n_b)
+        n_c = self.relu_c(n_c)
+        '''
+
+        n_a = self.tanh_a(n_a)
+        n_b = self.tanh_b(n_b)
+        n_c = self.tanh_c(n_c)
+
+        '''
+        n_a = self.d_a(n_a)
+        n_b = self.d_a(n_b)
+        n_c = self.d_a(n_c)
+        
+        n_a = self.relu_a(n_a)
+        n_b = self.relu_b(n_b)
+        n_c = self.relu_c(n_c)
+        '''
+
+        y_e = self.linear_e(torch.cat((n_a, n_b, n_c), 1))
+        # n_a = self.d_e(y_e)
+
+        # y_e = self.d_e(n_e)
+
         # n_a = torch.where(t_min > n_a, zeros, n_a)
         # n_b = torch.where(t_min > n_b, zeros, n_b)
         # n_c = torch.where(t_min > n_c, zeros, n_c)
 
-        # n_a = torch.where(n_a > t_max, zeros, n_a)
-        # n_b = torch.where(n_b > t_max, zeros, n_b)
-        # n_c = torch.where(n_c > t_max, zeros, n_c)
+        # n_a = torch.where(popularity <= thresholds[0], n_a, zeros)
+        # n_b = torch.where(popularity > thresholds[0], n_b, zeros)
+        # n_b = torch.where(popularity <= thresholds[1], n_b, zeros)
+        # n_c = torch.where(popularity > thresholds[1], n_c, zeros)
 
         # n_a = self.s1(y_a*(1-x))
         # n_b = self.s2(y_b*(1-x))
@@ -854,21 +1133,19 @@ class EnsembleMultiVAE(nn.Module):
         # print(y_b[0, :10])
         # print(y_c[0, :10])
 
-        # print('ya min', torch.min(n_a))
-        # print('ya max', torch.max(n_a))
+        '''
+        print('ya min', torch.min(n_a))
+        print('ya max', torch.max(n_a))
 
-        # print('yb min', torch.min(n_b))
-        # print('yb max', torch.max(n_b))
+        print('yb min', torch.min(n_b))
+        print('yb max', torch.max(n_b))
 
-        # print('yc min', torch.min(n_c))
-        # print('yc max', torch.max(n_c))
+        print('yc min', torch.min(n_c))
+        print('yc max', torch.max(n_c))
+        '''
 
-        #y_e = n_a + n_b
-        #y_e = torch.where(y_e > 1, ones, y_e)
-
-        #y_e = torch.max(z_a, z_b)
-        y_e = z_a + z_b
-        #y_e = torch.max(y_e, z_c)
+        # y_e = n_a + n_b + n_c
+        # y_e = torch.where(y_e > 1, ones, y_e)
 
         return y_e
 
@@ -983,8 +1260,8 @@ class rvae_focal_loss(rvae_loss):
 
 """# Train and test"""
 
-trainloader = DataLoader(data_dir, use_popularity=False)
-# dataloader = DataLoaderDummy(None)
+trainloader = DataLoader(data_dir, use_popularity=True)
+
 n_items = trainloader.n_items
 
 # SETTINGS
@@ -1037,13 +1314,14 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
-    for batch_idx, (x, pos, neg, mask, y_a, y_b) in enumerate(dataloader.iter_ensemble(batch_size=settings.batch_size)):
+    for batch_idx, (x, pos, neg, mask, y_a, y_b, y_c) in enumerate(dataloader.iter_ensemble(batch_size=settings.batch_size)):
         # for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=settings.batch_size)):
 
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
         mask = naive_sparse2tensor(mask).to(device)
+        popularity = naive_sparse2tensor(dataloader.item_popularity).to(device)
 
         update_count += 1
         if settings.total_anneal_steps > 0:
@@ -1053,12 +1331,12 @@ def train(dataloader, epoch, optimizer):
 
         # TRAIN on batch
         optimizer.zero_grad()
-        # y, mu, logvar = model(x, y_a, y_b)
-        y = model(x, popularity, y_a, y_b)
+
+        y = model(x, y_a, y_b, y_c)
 
         loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask)
-        # loss.backward()
-        # optimizer.step()
+        loss.backward()
+        optimizer.step()
 
         train_loss += loss.item()
         train_loss_cumulative += loss.item()
@@ -1095,19 +1373,20 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b, y_c) in enumerate(dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
             mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
+            popularity = naive_sparse2tensor(dataloader.item_popularity).to(device)
 
             batch_num += 1
             n_users_train += x_tensor.shape[0]
 
             x_input = x_tensor * (1 - mask_te)
 
-            y = model(x_input, popularity, y_a, y_b, True)
+            y = model(x_input, y_a, y_b, y_c, True)
 
             loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
 
@@ -1149,7 +1428,7 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 # %%capture output
 torch.set_printoptions(profile="full")
 
-n_epochs = 1
+n_epochs = 200
 update_count = 0
 settings.batch_size = 1024  # 256
 settings.learning_rate = 1e-4  # 1e-5
@@ -1158,7 +1437,7 @@ settings.scale = 1000
 settings.use_popularity = True
 settings.p_dims = [200, 600, n_items]
 
-model = EnsembleMultiVAE(n_items)
+model = EnsembleMultiVAE(trainloader.item_popularity, trainloader.thresholds)
 
 model = model.to(device)
 
