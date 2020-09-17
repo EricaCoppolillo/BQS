@@ -784,13 +784,13 @@ class EnsembleMultiVAE(nn.Module):
         self.min_c = torch.nn.Parameter(torch.tensor(-2.0, dtype=torch.float32, device=device))
         self.max_c = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32, device=device))
 
-        n_0=int(n_items / 2)
+        n_0 = int(n_items / 2)
         n_1 = int(n_items / 4)
         n_2 = int(n_items / 8)
 
-        self.linear_a_0 = nn.Linear(n_items, n_0)
-        self.linear_b_0 = nn.Linear(n_items, n_0)
-        self.linear_c_0 = nn.Linear(n_items, n_0)
+        self.linear_a_0 = nn.Linear(n_items * 4, n_items)
+        self.linear_b_0 = nn.Linear(n_items * 4, n_items)
+        self.linear_c_0 = nn.Linear(n_items * 4, n_items)
 
         self.linear_a_1 = nn.Linear(n_0, n_1)
         self.linear_b_1 = nn.Linear(n_0, n_1)
@@ -803,6 +803,10 @@ class EnsembleMultiVAE(nn.Module):
         self.linear_e_0 = nn.Linear(n_items * 2 + n_2 * 3, n_items)
         self.linear_e_1 = nn.Linear(n_items, n_items)
         self.linear_e_2 = nn.Linear(n_items, n_items)
+
+        self.bn_a_1 = torch.nn.BatchNorm1d(n_items)
+        self.bn_b_1 = torch.nn.BatchNorm1d(n_items)
+        self.bn_c_1 = torch.nn.BatchNorm1d(n_items)
 
     def normalize(self, tensor, min_v, max_v):
         range_v = max_v - min_v
@@ -818,14 +822,22 @@ class EnsembleMultiVAE(nn.Module):
 
         p = self.popularity_tensor.repeat(x.size()[0], 1)
 
-        # z_a = self.normalize(y_a, self.min_a, self.max_a)
-        # z_b = self.normalize(y_b, self.min_b, self.max_b)
-        # z_c = self.normalize(y_c, self.min_c, self.max_c)
+        #z_a = self.normalize(y_a, self.min_a, self.max_a)
+        #z_b = self.normalize(y_b, self.min_b, self.max_b)
+        #z_c = self.normalize(y_c, self.min_c, self.max_c)
 
-        # z_a = torch.cat((x, p, z_a), 1)
-        # z_b = torch.cat((x, p, z_b), 1)
-        # z_c = torch.cat((x, p, z_c), 1)
+        z_a = self.bn_a_1(y_a)
+        z_b = self.bn_b_1(y_b)
+        z_c = self.bn_c_1(y_c)
 
+        # z_a = torch.softmax(z_a, 1)
+        # z_b = torch.softmax(z_b, 1)
+        # z_c = torch.softmax(z_c, 1)
+
+        z_a = self.linear_a_0(torch.cat((p, z_a, z_b, z_c), 1))
+        z_b = self.linear_b_0(torch.cat((p, z_a, z_b, z_c), 1))
+        z_c = self.linear_c_0(torch.cat((p, z_a, z_b, z_c), 1))
+        '''
         z_a = self.linear_a_0(y_a)
         z_b = self.linear_b_0(y_b)
         z_c = self.linear_c_0(y_c)
@@ -855,8 +867,11 @@ class EnsembleMultiVAE(nn.Module):
         z_e = torch.tanh(z_e)
 
         y_e = self.linear_e_2(z_e)
+        '''
 
-        # y_e = z_a + z_b + z_c
+        y_e = z_a + z_b + z_c
+        # y_t = torch.max(z_a, z_b)
+        # y_e = torch.max(y_t, z_c)
 
         return y_e
 
@@ -1143,7 +1158,7 @@ n_epochs = 200
 update_count = 0
 settings.batch_size = 1024  # 256
 # settings.learning_rate = 1e-4  # 1e-5
-settings.learning_rate = 0.01  # 1e-5
+settings.learning_rate = 0.1  # 1e-5
 settings.optim = 'adam'
 settings.scale = 1000
 settings.use_popularity = True

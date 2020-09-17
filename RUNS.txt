@@ -43,6 +43,9 @@ RISULTATI
 Sembra che applicando la frequenza al numero di coppie si abbiano risultati
 migliori rispetto all'applicazione delle frequenze alla loss
 
+bvlsfn78l43d086g
+Angelo+stefy7078
+
 =============
 MOVIE LENS 1M
 =============
@@ -72,6 +75,43 @@ popularity_hitrate@5:  0.13, 0.43, 0.61
 ENSEMBLE 2 NO NN
 hitrate@5              0.45284044577330795
 popularity_hitrate@5   0.37, 0.32, 0.7
+
+
+
+
+
+
+low_pop: 953
+med_pop: 2367
+high_pop: 142
+
+ENSEMBLE 2 BEST 2 ensemble_2m_no_nn_best_v2.py
+=======================================================
+popularity_hitrate@5: 0.04, 0.46, 0.82 (0.00) 0.5730 BASELINE
+popularity_hitrate@5: 0.10, 0.44, 0.82 (0.15)
+popularity_hitrate@5: 0.12, 0.44, 0.81 (0.20) 0.5625
+popularity_hitrate@5: 0.20, 0.43, 0.80 (0.33) 0.5489
+popularity_hitrate@5: 0.23, 0.41, 0.80 (0.40) 0.5407
+popularity_hitrate@5: 0.36, 0.35, 0.74 (0.80)
+popularity_hitrate@5: 0.40, 0.32, 0.72 (1.00)
+=======================================================
+
+ENSEMBLE 2 BEST 2 ensemble_2m_no_nn_best_v3.py
+=======================================================
+popularity_hitrate@5: 0.31, 0.39, 0.78 (0.5747, 0.2826)
+=======================================================
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 2 Lin - 1 Lin

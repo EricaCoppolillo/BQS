@@ -17,7 +17,6 @@ import time
 import types
 from datetime import datetime
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -91,13 +90,18 @@ class DataLoader:
         # loading models
         print('loading ensemble models...')
         # low_dir = os.path.join(data_dir, 'popularity_low_pos_neg_filter')
+        baseline_dir = os.path.join(data_dir, 'baseline')
         low_dir = os.path.join(data_dir, 'popularity_low')
         med_dir = os.path.join(data_dir, 'popularity_med')
         high_dir = os.path.join(data_dir, 'popularity_high')
 
+        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
         low_file_model = os.path.join(low_dir, 'best_model.pth')
         med_file_model = os.path.join(med_dir, 'best_model.pth')
         high_file_model = os.path.join(high_dir, 'best_model.pth')
+
+        with open(baseline_file_model, 'rb') as f:
+            self.baseline_model = torch.load(f)
 
         with open(low_file_model, 'rb') as f:
             self.low_model = torch.load(f)
@@ -108,9 +112,11 @@ class DataLoader:
         with open(high_file_model, 'rb') as f:
             self.high_model = torch.load(f)
 
+        self.baseline_model.eval()
         self.low_model.eval()
         self.med_model.eval()
         self.high_model.eval()
+
         print('ensemble models loaded!')
 
         dataset_file = os.path.join(data_dir, 'data_rvae')
@@ -777,20 +783,20 @@ class EnsembleMultiVAE(nn.Module):
         print('n_items:', n_items)
         print('thresholds:', thresholds)
 
-        self.min_a = torch.nn.Parameter(torch.tensor(-6.0, dtype=torch.float32, device=device))
-        self.max_a = torch.nn.Parameter(torch.tensor(4.0, dtype=torch.float32, device=device))
-        self.min_b = torch.nn.Parameter(torch.tensor(-8.0, dtype=torch.float32, device=device))
-        self.max_b = torch.nn.Parameter(torch.tensor(4.0, dtype=torch.float32, device=device))
-        self.min_c = torch.nn.Parameter(torch.tensor(-2.0, dtype=torch.float32, device=device))
-        self.max_c = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32, device=device))
+        self.min_a = torch.nn.Parameter(torch.tensor(1, dtype=torch.float32, device=device))
+        self.max_a = torch.nn.Parameter(torch.tensor(0, dtype=torch.float32, device=device))
+        self.min_b = torch.nn.Parameter(torch.tensor(1, dtype=torch.float32, device=device))
+        self.max_b = torch.nn.Parameter(torch.tensor(0, dtype=torch.float32, device=device))
+        self.min_c = torch.nn.Parameter(torch.tensor(1, dtype=torch.float32, device=device))
+        self.max_c = torch.nn.Parameter(torch.tensor(0, dtype=torch.float32, device=device))
 
-        n_0=int(n_items / 2)
+        n_0 = int(n_items / 2)
         n_1 = int(n_items / 4)
         n_2 = int(n_items / 8)
 
-        self.linear_a_0 = nn.Linear(n_items, n_0)
-        self.linear_b_0 = nn.Linear(n_items, n_0)
-        self.linear_c_0 = nn.Linear(n_items, n_0)
+        self.linear_a_0 = nn.Linear(n_items * 4, n_items)
+        self.linear_b_0 = nn.Linear(n_items * 4, n_items)
+        self.linear_c_0 = nn.Linear(n_items * 4, n_items)
 
         self.linear_a_1 = nn.Linear(n_0, n_1)
         self.linear_b_1 = nn.Linear(n_0, n_1)
@@ -804,6 +810,10 @@ class EnsembleMultiVAE(nn.Module):
         self.linear_e_1 = nn.Linear(n_items, n_items)
         self.linear_e_2 = nn.Linear(n_items, n_items)
 
+        self.bn_a_1 = torch.nn.BatchNorm1d(n_items)
+        self.bn_b_1 = torch.nn.BatchNorm1d(n_items)
+        self.bn_c_1 = torch.nn.BatchNorm1d(n_items)
+
     def normalize(self, tensor, min_v, max_v):
         range_v = max_v - min_v
 
@@ -812,9 +822,9 @@ class EnsembleMultiVAE(nn.Module):
         return normalised
 
     def forward(self, x, y_a, y_b, y_c, predict=False):
-        # print('Range A: [', self.min_a.item(), ', ', self.max_a.item(), ']', sep='')
-        # print('Range B: [', self.min_b.item(), ', ', self.max_b.item(), ']', sep='')
-        # print('Range C: [', self.min_c.item(), ', ', self.max_c.item(), ']', sep='')
+        print('Range A: [', self.min_a.item(), ', ', self.max_a.item(), ']', sep='')
+        print('Range B: [', self.min_b.item(), ', ', self.max_b.item(), ']', sep='')
+        print('Range C: [', self.min_c.item(), ', ', self.max_c.item(), ']', sep='')
 
         p = self.popularity_tensor.repeat(x.size()[0], 1)
 
@@ -822,10 +832,22 @@ class EnsembleMultiVAE(nn.Module):
         # z_b = self.normalize(y_b, self.min_b, self.max_b)
         # z_c = self.normalize(y_c, self.min_c, self.max_c)
 
-        # z_a = torch.cat((x, p, z_a), 1)
-        # z_b = torch.cat((x, p, z_b), 1)
-        # z_c = torch.cat((x, p, z_c), 1)
+        # z_a = self.bn_a_1(y_a)
+        # z_b = self.bn_b_1(y_b)
+        # z_c = self.bn_c_1(y_c)
 
+        z_a = torch.softmax(y_a, 1)
+        z_b = torch.softmax(y_b, 1)
+        z_c = torch.softmax(y_c, 1)
+
+        # z_a = self.min_a * z_a  # + self.max_a
+        # z_b = self.min_b * z_b  # + self.max_b
+        # z_c = self.min_c * z_c  # + self.max_c
+
+        # z_a = self.linear_a_0(torch.cat((p, z_a, z_b, z_c), 1))
+        # z_b = self.linear_b_0(torch.cat((p, z_a, z_b, z_c), 1))
+        # z_c = self.linear_c_0(torch.cat((p, z_a, z_b, z_c), 1))
+        '''
         z_a = self.linear_a_0(y_a)
         z_b = self.linear_b_0(y_b)
         z_c = self.linear_c_0(y_c)
@@ -855,8 +877,11 @@ class EnsembleMultiVAE(nn.Module):
         z_e = torch.tanh(z_e)
 
         y_e = self.linear_e_2(z_e)
+        '''
 
-        # y_e = z_a + z_b + z_c
+        y_e = z_a * 0.8 + z_b * 1.0 + z_c * 0.8
+        # y_t = torch.max(z_a, z_b)
+        # y_e = torch.max(y_t, z_c)
 
         return y_e
 
@@ -917,24 +942,22 @@ class rvae_rank_pair_loss(rvae_loss):
         super(rvae_rank_pair_loss, self).__init__(**kargs)
 
     def log_p(self, x, y, pos_items, neg_items, mask):
-        '''
-        pos
-
-
-        '''
         weight = mask
 
         y1 = torch.gather(y, 1, (pos_items).long()) * mask
         y2 = torch.gather(y, 1, (neg_items).long()) * mask
 
-        freq_pos = self.frequencies[pos_items.long()].float()
-        freq_neg = self.frequencies[neg_items.long()].float()
+        # freq_pos = self.frequencies[pos_items.long()].float()
+        # freq_neg = self.frequencies[neg_items.long()].float()
         # print('FREQ:',freq_pos[:10])
 
         # neg_ll = -torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
         neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
         # neg_ll = - torch.sum(self.logsigmoid(y1 * freq_pos.float() - y2 * freq_neg.float()) * weight) / mask.sum()
 
+        del y1
+        del y2
+        torch.cuda.empty_cache()
         return neg_ll
 
 
@@ -1143,7 +1166,7 @@ n_epochs = 200
 update_count = 0
 settings.batch_size = 1024  # 256
 # settings.learning_rate = 1e-4  # 1e-5
-settings.learning_rate = 0.01  # 1e-5
+settings.learning_rate = 1  # 0.1  # 1e-5
 settings.optim = 'adam'
 settings.scale = 1000
 settings.use_popularity = True

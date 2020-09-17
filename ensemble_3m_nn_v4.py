@@ -784,9 +784,13 @@ class EnsembleMultiVAE(nn.Module):
         self.min_c = torch.nn.Parameter(torch.tensor(-2.0, dtype=torch.float32, device=device))
         self.max_c = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32, device=device))
 
-        n_0=int(n_items / 2)
-        n_1 = int(n_items / 4)
-        n_2 = int(n_items / 8)
+        n_0 = n_items  # int(n_items / 2)
+        n_1 = n_items  # int(n_items / 4)
+        n_2 = n_items  # int(n_items / 8)
+
+        self.linear_a = nn.Linear(n_items * 5, n_items)
+        self.linear_b = nn.Linear(n_items * 5, n_items)
+        self.linear_c = nn.Linear(n_items * 5, n_items)
 
         self.linear_a_0 = nn.Linear(n_items, n_0)
         self.linear_b_0 = nn.Linear(n_items, n_0)
@@ -799,6 +803,8 @@ class EnsembleMultiVAE(nn.Module):
         self.linear_a_2 = nn.Linear(n_1, n_2)
         self.linear_b_2 = nn.Linear(n_1, n_2)
         self.linear_c_2 = nn.Linear(n_1, n_2)
+
+        self.linear_e = nn.Linear(n_items * 4, n_items)
 
         self.linear_e_0 = nn.Linear(n_items * 2 + n_2 * 3, n_items)
         self.linear_e_1 = nn.Linear(n_items, n_items)
@@ -826,35 +832,21 @@ class EnsembleMultiVAE(nn.Module):
         # z_b = torch.cat((x, p, z_b), 1)
         # z_c = torch.cat((x, p, z_c), 1)
 
-        z_a = self.linear_a_0(y_a)
-        z_b = self.linear_b_0(y_b)
-        z_c = self.linear_c_0(y_c)
-
-        z_a = torch.tanh(z_a)
-        z_b = torch.tanh(z_b)
-        z_c = torch.tanh(z_c)
+        z_a = self.linear_a(torch.cat((x, p, y_a, y_b, y_c), 1))
+        z_b = self.linear_b(torch.cat((x, p, y_a, y_b, y_c), 1))
+        z_c = self.linear_c(torch.cat((x, p, y_a, y_b, y_c), 1))
 
         z_a = self.linear_a_1(z_a)
         z_b = self.linear_b_1(z_b)
         z_c = self.linear_c_1(z_c)
 
-        z_a = torch.tanh(z_a)
-        z_b = torch.tanh(z_b)
-        z_c = torch.tanh(z_c)
-
         z_a = self.linear_a_2(z_a)
         z_b = self.linear_b_2(z_b)
         z_c = self.linear_c_2(z_c)
 
-        z_e = torch.cat((x, p, z_a, z_b, z_c), 1)
-
-        z_e = self.linear_e_0(z_e)
-        z_e = torch.tanh(z_e)
-
-        z_e = self.linear_e_1(z_e)
-        z_e = torch.tanh(z_e)
-
-        y_e = self.linear_e_2(z_e)
+        y_e = self.linear_e(torch.cat((p, z_a, z_b, z_c), 1))
+        y_e = self.linear_e_1(y_e)
+        y_e = self.linear_e_2(y_e)
 
         # y_e = z_a + z_b + z_c
 
@@ -1143,7 +1135,7 @@ n_epochs = 200
 update_count = 0
 settings.batch_size = 1024  # 256
 # settings.learning_rate = 1e-4  # 1e-5
-settings.learning_rate = 0.01  # 1e-5
+settings.learning_rate = 0.001  # 1e-5
 settings.optim = 'adam'
 settings.scale = 1000
 settings.use_popularity = True
