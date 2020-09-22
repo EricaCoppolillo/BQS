@@ -135,12 +135,9 @@ class MetricAccumulator:
                     if score_pos > score_top_k:
                         hit_pop[2] += 1
 
-                if recall == top_k:
-                    break
-
             assert hit <= len(predicted_item), f'{hit} / {len(predicted_item)}'
             assert sum(hit_pop) == hit, f'hit count error {hit} != {hit_pop}'
-            # assert len(predicted_item) == sum(hit_pop_tot), f'hit count error {len(predicted_item)} != {hit_pop_tot}'
+            assert len(predicted_item) == sum(hit_pop_tot), f'hit count error {len(predicted_item)} != {hit_pop_tot}'
 
             accumulator = self.data[top_k]
             accumulator._total_positives += np.array(hit_pop_tot)
