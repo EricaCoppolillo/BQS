@@ -1093,7 +1093,8 @@ plt.show();
 model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
 
-print(f'K = {settings.gamma_k}')
+print('*** TEST RESULTS ***')
+# print(f'K = {settings.gamma_k}')
 print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
 
 """# Save result"""

@@ -4,14 +4,14 @@ import numpy as np
 class SimpleMetric:
     def __init__(self):
         self.recall = 0
+        self.recall_den = 0
         self.weighted_recall = 0
+        self.weighted_recall_den = 0
         self.hitrate = 0
         self.weighted_hitrate = 0
         self.recall_by_pop = np.zeros(3)
 
-        self._total_positives = np.zeros(3)
         self._num_users = 0
-        self._total_weights = .0
 
     def metric_names(self):
         return ('recall', 'weighted_recall',
@@ -52,12 +52,11 @@ class MetricAccumulator:
                 acc = self.data[k]
 
                 computed_acc = SimpleMetric()
-                computed_acc.recall = acc.recall / acc._total_positives.sum()
-                computed_acc.weighted_recall = acc.weighted_recall / acc._total_weights
+                computed_acc.recall = acc.recall / acc.recall_den
+                computed_acc.weighted_recall = acc.weighted_recall / acc.weighted_recall_den
                 computed_acc.hitrate = acc.hitrate / acc._num_users
                 computed_acc.weighted_hitrate = acc.weighted_hitrate / acc._num_users
-                computed_acc.recall_by_pop = acc.recall_by_pop / acc._total_positives
-                computed_acc.recall_by_pop[np.isnan(computed_acc.recall_by_pop)] = 0
+                computed_acc.recall_by_pop = acc.recall_by_pop / acc._num_users
 
                 result[k] = computed_acc
 
@@ -84,70 +83,54 @@ class MetricAccumulator:
         assert min([len(r) for r in neg]) >= top_k and top_k > 0, f"fail with top_k = {top_k} and neg = {[len(r) for r in neg]}"
         assert len(popularity) == y.shape[-1], f'{len(popularity)} != {y.shape[-1]}'
 
-        for i in range(y.shape[0]):
-            input_idx = np.where(x[i, :] == 1)[0]
-            score = y[i, :]
+        for user in range(y.shape[0]):
+            input_idx = np.where(x[user, :] == 1)[0]
+            score = y[user, :]
 
             viewed_item = set(input_idx)
-            positive_items = set(pos[i])
-            negative_items = neg[i]
-            neg_scores = sorted(score[negative_items].tolist(), reverse=True)
-
-            # Tutti i positivi predetti meno quelli visti
+            positive_items = set(pos[user])
+            score[input_idx] = - np.inf  # hide viewed
             predicted_item = positive_items - viewed_item
-            recall = 0
-            weighted_recall = 0
-            hit = 0
-            weighted_hit = 0
-            weights = .0
-            hit_pop = [0, 0, 0]
-            hit_pop_tot = [0, 0, 0]
 
-            for pos_item in predicted_item:
-                score_pos = score[pos_item]
-                current_popularity = popularity[pos_item]
-                score_top_k = neg_scores[top_k - 1]
+            ranked_idx = np.argsort(-score)
+            ranked_top_k_idx = ranked_idx[:top_k]
 
-                weights += 1 - current_popularity
+            H_u = [i for i in predicted_item if i in ranked_top_k_idx]
+            P_u_c = sorted(list(predicted_item), key=lambda i: ranked_idx[i])[:top_k]
 
-                if score_pos > score_top_k:
-                    recall += 1
-                    weighted_recall += 1 - current_popularity
-                    hit += 1
-                    weighted_hit += 1 - current_popularity
-
-                # popularity
-                if current_popularity <= popularity_thresholds[0]:
-
-                    hit_pop_tot[0] += 1
-                    if score_pos > score_top_k:
-                        hit_pop[0] += 1
-
-                elif popularity_thresholds[0] < current_popularity <= popularity_thresholds[1]:
-
-                    hit_pop_tot[1] += 1
-                    if score_pos > score_top_k:
-                        hit_pop[1] += 1
-
-                else:  # current_popularity > popularity_thresholds[1]
-
-                    hit_pop_tot[2] += 1
-                    if score_pos > score_top_k:
-                        hit_pop[2] += 1
-
-            assert hit <= len(predicted_item), f'{hit} / {len(predicted_item)}'
-            assert sum(hit_pop) == hit, f'hit count error {hit} != {hit_pop}'
-            assert len(predicted_item) == sum(hit_pop_tot), f'hit count error {len(predicted_item)} != {hit_pop_tot}'
+            weights_H_u = sum([1 - popularity[i] for i in H_u])
+            weights_P_u_c = sum([1 - popularity[i] for i in P_u_c])
 
             accumulator = self.data[top_k]
-            accumulator._total_positives += np.array(hit_pop_tot)
             accumulator._num_users += 1
-            accumulator._total_weights += weights
-            accumulator.recall += recall
-            accumulator.weighted_recall += weighted_recall
-            accumulator.hitrate += hit / min(top_k, len(predicted_item))
-            accumulator.weighted_hitrate += weighted_hit / weights
-            accumulator.recall_by_pop += np.array(hit_pop)
+
+            accumulator.recall += len(H_u)
+            accumulator.recall_den += min(len(predicted_item), top_k)
+            accumulator.weighted_recall += weights_H_u
+            accumulator.weighted_recall_den += weights_P_u_c
+
+            accumulator.hitrate += len(H_u) / min(top_k, len(predicted_item))
+            accumulator.weighted_hitrate += weights_H_u / weights_P_u_c
+
+            pop_dict = {0: [], 1: [], 2: []}
+            for i in ranked_idx:
+                current_popularity = popularity[i]
+
+                if current_popularity <= popularity_thresholds[0]:
+                    idx = 0
+                elif popularity_thresholds[0] < current_popularity <= popularity_thresholds[1]:
+                    idx = 1
+                else:
+                    idx = 2
+
+                pop_dict[idx].append(i)
+
+            for idx, split_list in pop_dict.items():
+                H_u = [i for i in predicted_item if i in split_list[:top_k]]
+
+                # print(f'H_u_{idx} / P_u = {len(H_u)} / {min(len(split_list), top_k)} = {len(H_u) / min(len(split_list), top_k)}')
+                if len(split_list) > 0:
+                    accumulator.recall_by_pop[idx] += len(H_u) / min(len(split_list), top_k)
 
 
 class OldMetricAccumulator:
