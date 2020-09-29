@@ -9,15 +9,15 @@ class SimpleMetric:
         self.weighted_recall_den = 0
         self.hitrate = 0
         self.weighted_hitrate = 0
-        self.recall_by_pop = np.zeros(3)
-        self.recall_by_pop_users = np.zeros(3)
+        self.hitrate_by_pop = np.zeros(3)
+        self.hitrate_by_pop_users = np.zeros(3)
 
         self._num_users = 0
 
     def metric_names(self):
         return ('recall', 'weighted_recall',
                 'hitrate', 'weighted_hitrate',
-                'recall_by_pop')
+                'hitrate_by_pop')
 
     def __getitem__(self, item):
         v = getattr(self, item)
@@ -28,7 +28,7 @@ class SimpleMetric:
     def __str__(self):
         return f'recall = {self.recall:.2f}, weighted_recall = {self.weighted_recall:.2f}, ' \
                f'hitrate = {self.hitrate:.2f}, weighted_hitrate = {self.weighted_hitrate:.2f} ' \
-               f'recall_by_pop = {[f"{x:.2f}" for x in self.recall_by_pop]}'
+               f'hitrate_by_pop = {[f"{x:.2f}" for x in self.hitrate_by_pop]}'
 
     def __repr__(self):
         return self.__str__()
@@ -57,7 +57,7 @@ class MetricAccumulator:
                 computed_acc.weighted_recall = acc.weighted_recall / acc.weighted_recall_den
                 computed_acc.hitrate = acc.hitrate / acc._num_users
                 computed_acc.weighted_hitrate = acc.weighted_hitrate / acc._num_users
-                computed_acc.recall_by_pop = acc.recall_by_pop / acc.recall_by_pop_users
+                computed_acc.hitrate_by_pop = acc.hitrate_by_pop / acc.hitrate_by_pop_users
 
                 result[k] = computed_acc
 
@@ -131,9 +131,9 @@ class MetricAccumulator:
 
                 # print(f'H_u_{idx} / P_u = {len(H_u)} / {min(len(split_list), top_k)} = {len(H_u) / min(len(split_list), top_k)}')
                 if len(split_list) > 0:
-                    accumulator.recall_by_pop[idx] += len(H_u) / min(len(split_list), top_k)
+                    accumulator.hitrate_by_pop[idx] += len(H_u) / min(len(split_list), top_k)
 
-                    accumulator.recall_by_pop_users[idx] += 1
+                    accumulator.hitrate_by_pop_users[idx] += 1
 
 
 class OldMetricAccumulator:
@@ -156,8 +156,8 @@ class OldMetricAccumulator:
 
                 computed_acc = SimpleMetric()
                 computed_acc.recall = acc.recall / acc._total_positives.sum()
-                computed_acc.recall_by_pop = acc.recall_by_pop / acc._total_positives
-                computed_acc.recall_by_pop[np.isnan(computed_acc.recall_by_pop)] = 0
+                computed_acc.hitrate_by_pop = acc.hitrate_by_pop / acc._total_positives
+                computed_acc.hitrate_by_pop[np.isnan(computed_acc.hitrate_by_pop)] = 0
 
                 result[k] = computed_acc
 
@@ -242,7 +242,7 @@ class OldMetricAccumulator:
             accumulator._total_positives += np.array(hit_pop_tot)
             accumulator._num_users += 1
             accumulator.recall += hit
-            accumulator.recall_by_pop += np.array(hit_pop)
+            accumulator.hitrate_by_pop += np.array(hit_pop)
 
 
 if __name__ == '__main__':

@@ -24,7 +24,7 @@ torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-if 'CUDA_VISIBLE_DEVICES' not  in os.environ:
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 USE_CUDA = True
@@ -129,7 +129,8 @@ class DataLoader:
 
         gamma = self.pos_neg_ratio
         # gamma = 1
-        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
+        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
+                            self.item_popularity]
 
         # self.frequencies = [int(round(sqrt(self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
         # self.double_frequencies = [self.max_popularity * (self.pos_neg_ratio / min(p, self.max_popularity)) for p in self.item_popularity]
@@ -438,7 +439,8 @@ class DataLoader:
 
     def iter_test_ensemble(self, batch_size=256, tag='train'):
 
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(self.iter_test(batch_size=batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
+                self.iter_test(batch_size=batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             mask_te_tensor = naive_sparse2tensor(mask_te).to(device)
 
@@ -550,7 +552,8 @@ def sigmoid(z):
 def y_aux_popularity(x):
     f = 1 / (settings.metrics_beta * np.sqrt(2 * np.pi))
     y = np.tanh(settings.metrics_alpha * x) + \
-        settings.metrics_scale * f * np.exp(-1 / (2 * (settings.metrics_beta ** 2)) * (x - settings.metrics_percentile) ** 2)
+        settings.metrics_scale * f * np.exp(
+        -1 / (2 * (settings.metrics_beta ** 2)) * (x - settings.metrics_percentile) ** 2)
     return y
 
 
@@ -934,7 +937,8 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
+                dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
@@ -956,11 +960,11 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 
             for k in top_k:
                 accumulator.compute_metric(x_input.cpu().numpy(),
-                                     recon_batch_cpu,
-                                     pos_te, neg_te,
-                                     popularity,
-                                     dataloader.thresholds,
-                                     k)
+                                           recon_batch_cpu,
+                                           pos_te, neg_te,
+                                           popularity,
+                                           dataloader.thresholds,
+                                           k)
 
     for k, values in accumulator.get_metrics().items():
         for v in values.metric_names():
@@ -1006,7 +1010,8 @@ try:
         optimizer = torch.optim.SGD(params=model.parameters(), lr=settings.learning_rate, momentum=0.9,
                                     dampening=0, weight_decay=0, nesterov=True)
     else:
-        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08, weight_decay=settings.weight_decay, momentum=0, centered=False)
+        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08,
+                                        weight_decay=settings.weight_decay, momentum=0, centered=False)
 
     for epoch in range(1, n_epochs + 1):
         epoch_start_time = time.time()
@@ -1017,7 +1022,8 @@ try:
         stat_metric.append(result)
 
         print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
-        ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in ('train_loss', 'loss', 'hitrate@5', 'popularity_hitrate@5')])
+        ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if
+                         k in ('train_loss', 'loss', 'hitrate@5', 'popularity_hitrate@5')])
         ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
         ls = len(ss)
         print('-' * ls)
@@ -1078,13 +1084,13 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'recall_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
 
         ax.plot(hitRate)
-        ax.set_title(f'{name} recall_by_pop@{k}')
+        ax.set_title(f'{name} hitrate_by_pop@{k}')
 
 plt.show();
 
@@ -1168,13 +1174,13 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'recall_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
 
         ax.plot(hitRate)
-        ax.set_title(f'{name} recall_by_pop@{k}')
+        ax.set_title(f'{name} hitrate_by_pop@{k}')
 
 plt.savefig(os.path.join(folder_name, 'hr.png'));
 
