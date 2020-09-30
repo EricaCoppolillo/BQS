@@ -226,3 +226,168 @@ popularity_hitrate@5   0.68, 0.65, 0.6
 LOSS:
 popularity_hitrate@5   0.57, 0.65, 0.67
 
+
+------------------------------------------
+hitrate@1              0.3407079646017699
+hitrate@10             0.286193636746734
+hitrate@5              0.3067846607669604
+hitrate_by_pop@1       0.01,0.21,0.36
+hitrate_by_pop@10      0.00,0.15,0.29
+hitrate_by_pop@5       0.00,0.17,0.33
+loss                   0.2170695811510086
+recall@1               0.3407079646017699
+recall@10              0.3032106111317714
+recall@5               0.31043771043771046
+train_loss             0.17477879524230958
+weighted_hitrate@1     0.32104046856160356
+weighted_hitrate@10    0.2685855053719639
+weighted_hitrate@5     0.28688629880489747
+weighted_recall@1      0.3165887213797534
+weighted_recall@10     0.28235092884833335
+weighted_recall@5      0.28810231265413855
+K = 1000
+hitrate@1              0.334070796460177
+hitrate@10             0.29207534414945907
+hitrate@5              0.31360619469026446
+hitrate_by_pop@1       0.00,0.23,0.36
+hitrate_by_pop@10      0.00,0.15,0.28
+hitrate_by_pop@5       0.00,0.18,0.32
+loss                   0.21956343948841095
+recall@1               0.334070796460177
+recall@10              0.3080074487895717
+recall@5               0.31737469094178467
+train_loss             0
+weighted_hitrate@1     0.31569078443224213
+weighted_hitrate@10    0.2735276661037397
+weighted_hitrate@5     0.2936158028877312
+weighted_recall@1      0.3063609466144025
+weighted_recall@10     0.2855677500258245
+weighted_recall@5      0.29353652176133893
+
+------------------------------------------
+
+hitrate@1              0.16924778761061948
+hitrate@10             0.1394595448798987
+hitrate@5              0.14762168141592977
+hitrate_by_pop@1       0.01,0.12,0.39
+hitrate_by_pop@10      0.00,0.09,0.28
+hitrate_by_pop@5       0.01,0.10,0.33
+loss                   0.44173431396484375
+recall@1               0.16924778761061948
+recall@10              0.14999380190901201
+recall@5               0.14971941638608305
+train_loss             0.17949062287807466
+weighted_hitrate@1     0.17311292229665276
+weighted_hitrate@10    0.14065588388893166
+weighted_hitrate@5     0.1493137012282968
+weighted_recall@1      0.16900000319416356
+weighted_recall@10     0.15062301190797311
+weighted_recall@5      0.14991360153617972
+K = 1000
+
+
+
+hitrate@1              0.13716814159292035
+hitrate@10             0.11406359741536723
+hitrate@5              0.11474926253687365
+hitrate_by_pop@1       0.00,0.10,0.36
+hitrate_by_pop@10      0.00,0.08,0.28
+hitrate_by_pop@5       0.00,0.08,0.32
+loss                   0.4453364610671997
+recall@1               0.13716814159292035
+recall@10              0.12203600248292985
+recall@5               0.11643065857496067
+train_loss             0
+weighted_hitrate@1     0.14020115273156797
+weighted_hitrate@10    0.11507032426150465
+weighted_hitrate@5     0.11543743668894176
+weighted_recall@1      0.14000147544027888
+weighted_recall@10     0.12286109164769586
+weighted_recall@5      0.1169118678519389
+DONE ./data/ml-1m/results/run_ml-1m_20200929_1501_rvae_rank_pair_loss
+
+Process finished with exit code 0
+
+
+FIXED
+
+POP=True
+
+hitrate@1              0.16261061946902655
+hitrate@10             0.13646052816406787
+hitrate@5              0.1449668141592927
+hitrate_by_pop@1       0.00,0.12,0.56
+hitrate_by_pop@10      0.01,0.09,0.45
+hitrate_by_pop@5       0.01,0.10,0.50
+loss                   0.44005319476127625
+recall@1               0.16261061946902655
+recall@10              0.14677079459526465
+recall@5               0.14702581369248036
+train_loss             0.17948199212551116
+weighted_hitrate@1     0.16261061946902655
+weighted_hitrate@10    0.13717606152020234
+weighted_hitrate@5     0.1456354276413077
+weighted_recall@1      0.15897868134652302
+weighted_recall@10     0.1469999064345562
+weighted_recall@5      0.14644874711046937
+K = 1000
+hitrate@1              0.13606194690265486
+hitrate@10             0.11385333263098733
+hitrate@5              0.11386430678466135
+hitrate_by_pop@1       0.00,0.11,0.47
+hitrate_by_pop@10      0.00,0.08,0.41
+hitrate_by_pop@5       0.00,0.08,0.45
+loss                   0.4445972740650177
+recall@1               0.13606194690265486
+recall@10              0.12203600248292985
+recall@5               0.11553158013036638
+train_loss             0
+weighted_hitrate@1     0.13606194690265486
+weighted_hitrate@10    0.11421739727170865
+weighted_hitrate@5     0.1139862857306261
+weighted_recall@1      0.1350873053817963
+weighted_recall@10     0.12229960719676798
+weighted_recall@5      0.11507074718907251
+
+POP=False
+
+hitrate@1              0.33738938053097345
+hitrate@10             0.28711722151987606
+hitrate@5              0.30435103244837636
+hitrate_by_pop@1       nan,0.30,0.35
+hitrate_by_pop@10      0.00,0.19,0.32
+hitrate_by_pop@5       0.00,0.23,0.33
+loss                   0.21652339398860931
+recall@1               0.33738938053097345
+recall@10              0.3039543820503285
+recall@5               0.3079685746352413
+train_loss             0.17471846640110017
+weighted_hitrate@1     0.33738938053097345
+weighted_hitrate@10    0.2761875130010152
+weighted_hitrate@5     0.297225458019393
+weighted_recall@1      0.32970464996679133
+weighted_recall@10     0.28798199856302825
+weighted_recall@5      0.29420764592050863
+K = 1000
+
+
+
+hitrate@1              0.32964601769911506
+hitrate@10             0.294966814159292
+hitrate@5              0.31292404129793405
+hitrate_by_pop@1       nan,0.27,0.35
+hitrate_by_pop@10      nan,0.21,0.32
+hitrate_by_pop@5       nan,0.25,0.35
+loss                   0.21972867846488953
+recall@1               0.32964601769911506
+recall@10              0.31036623215394166
+recall@5               0.31647561249719036
+train_loss             0
+weighted_hitrate@1     0.32964601769911506
+weighted_hitrate@10    0.28305456306326676
+weighted_hitrate@5     0.30517403985261243
+weighted_recall@1      0.32159137282415157
+weighted_recall@10     0.293366689618736
+weighted_recall@5      0.301112187420866
+
+

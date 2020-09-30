@@ -761,7 +761,7 @@ class rvae_focal_loss(rvae_loss):
 
 """# Train and test"""
 
-trainloader = DataLoader(dataset_file, use_popularity=False)
+trainloader = DataLoader(dataset_file, use_popularity=True)
 # dataloader = DataLoaderDummy(None)
 n_items = trainloader.n_items
 
@@ -924,7 +924,7 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 # %%capture output
 torch.set_printoptions(profile="full")
 
-n_epochs = 200
+n_epochs = 50
 update_count = 0
 settings.optim = 'adam'
 settings.scale = 1000

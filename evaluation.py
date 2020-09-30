@@ -1,6 +1,7 @@
 import collections
 import numpy as np
 
+
 class SimpleMetric:
     def __init__(self):
         self.recall = 0
@@ -85,36 +86,51 @@ class MetricAccumulator:
         assert len(popularity) == y.shape[-1], f'{len(popularity)} != {y.shape[-1]}'
 
         for user in range(y.shape[0]):
-            input_idx = np.where(x[user, :] == 1)[0]
-            score = y[user, :]
+            input_idx = np.where(x[user, :] == 1)[0]  # indice degli oggetti in input per l'utente user
+            score = y[user, :]  # score degli oggetti
 
             viewed_item = set(input_idx)
             positive_items = set(pos[user])
             score[input_idx] = - np.inf  # hide viewed
-            predicted_item = positive_items - viewed_item
+            predicted_item = positive_items - viewed_item  # si considerano solo gli oggetti non forniti in input
 
-            ranked_idx = np.argsort(-score)
-            ranked_top_k_idx = ranked_idx[:top_k]
+            ranked_idx = np.argsort(-score)  # indici degli items ordinati per score in modo decrescente
+            ranked_top_k_idx = ranked_idx[:top_k]  # indici dei top K elementi (ordinati per score in modo decrescente)
 
-            H_u = [i for i in predicted_item if i in ranked_top_k_idx]
-            P_u_c = sorted(list(predicted_item), key=lambda i: ranked_idx[i])[:top_k]
+            H_u = [i for i in predicted_item if i in ranked_top_k_idx]  # elementi che piacciono all'utente nei top K
 
-            weights_H_u = sum([1 - popularity[i] for i in H_u])
-            weights_P_u_c = sum([1 - popularity[i] for i in P_u_c])
+            #TODO (Verificare)
+            # C'e' un errore nell'istruzione seguente!
+            # si usa come valore per l'ordinamento l'indice e non lo score!
+            # -------------------------------------------------------------------------
+            # P_u_c = sorted(list(predicted_item), key=lambda i: ranked_idx[i])[:top_k]
+            # -------------------------------------------------------------------------
+
+            P_u_c = sorted(list(predicted_item), key=lambda i: -score[i])[:top_k]
+
+            weights_H_u = sum([1 - popularity[i] for i in H_u])  # Numeratore
+            weights_P_u_c = sum([1 - popularity[i] for i in P_u_c])  # Denominatore
 
             accumulator = self.data[top_k]
             accumulator._num_users += 1
 
-            accumulator.recall += len(H_u)
-            accumulator.recall_den += min(len(predicted_item), top_k)
-            accumulator.weighted_recall += weights_H_u
-            accumulator.weighted_recall_den += weights_P_u_c
+            accumulator.recall += len(H_u)  # ok
+            accumulator.recall_den += min(len(predicted_item), top_k)  # ok
+            accumulator.weighted_recall += weights_H_u  # ok
+            accumulator.weighted_recall_den += weights_P_u_c  # ok
 
-            accumulator.hitrate += len(H_u) / min(top_k, len(predicted_item))
-            accumulator.weighted_hitrate += weights_H_u / weights_P_u_c
+            accumulator.hitrate += len(H_u) / min(top_k, len(predicted_item))  # ok
+            accumulator.weighted_hitrate += weights_H_u / weights_P_u_c  # ok
 
             pop_dict = {0: [], 1: [], 2: []}
-            for i in ranked_idx:
+
+            #TODO possibile errore nel prossimo for:
+            # non dobbiamo considerare solo i topK predetti e non TUTTI gli oggetti?
+            # --------------------
+            # for i in ranked_idx:
+            # --------------------
+
+            for i in ranked_top_k_idx:
                 current_popularity = popularity[i]
 
                 if current_popularity <= popularity_thresholds[0]:
@@ -127,7 +143,13 @@ class MetricAccumulator:
                 pop_dict[idx].append(i)
 
             for idx, split_list in pop_dict.items():
-                H_u = [i for i in predicted_item if i in split_list[:top_k]]
+
+                #TODO
+                # ------------------------------------------------------------
+                # H_u = [i for i in predicted_item if i in split_list[:top_k]]
+                # ------------------------------------------------------------
+
+                H_u = [i for i in predicted_item if i in split_list]
 
                 # print(f'H_u_{idx} / P_u = {len(H_u)} / {min(len(split_list), top_k)} = {len(H_u) / min(len(split_list), top_k)}')
                 if len(split_list) > 0:
@@ -248,10 +270,10 @@ class OldMetricAccumulator:
 if __name__ == '__main__':
     acc = MetricAccumulator()
 
-    x = np.array([1,0,0,0,0,1,0,0,0,0]).reshape((2, 5))
-    y = np.array([.7,.9,.1,.1,.1,.9,.9,.9,.1,.1]).reshape((2, 5))
-    pos = [[0,1], [0,1,2]]
-    neg = [[3,4], [3,4]]
+    x = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0]).reshape((2, 5))
+    y = np.array([.7, .9, .1, .1, .1, .9, .9, .9, .1, .1]).reshape((2, 5))
+    pos = [[0, 1], [0, 1, 2]]
+    neg = [[3, 4], [3, 4]]
     popularity_thresholds = [.4, .8]
     popularity = [.1, .1, .9, .4, .5]
 
