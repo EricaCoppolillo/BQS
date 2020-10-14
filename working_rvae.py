@@ -1,3 +1,5 @@
+# Commented out IPython magic to ensure Python compatibility.
+
 SEED = 8734
 
 import collections
@@ -19,7 +21,6 @@ import time
 
 import torch.nn as nn
 import torch
-
 from evaluation import MetricAccumulator
 
 torch.manual_seed(SEED)
@@ -41,10 +42,13 @@ if CUDA:
 else:
     print('cuda not available')
 
-# dataset_name = 'ml-1m'
+do_training = False
+trained_model_path = './data/ml-1m/popularity_low/best_model.pth'
+
+dataset_name = 'ml-1m'
 # dataset_name = 'ml-20m'
 # dataset_name = 'netflix_sample'
-dataset_name = 'pinterest'
+# dataset_name = 'pinterest'
 # dataset_name = 'epinions'
 
 data_dir = os.path.expanduser('./data')
@@ -65,15 +69,6 @@ file_train = os.path.join(proc_dir, 'train_glob')
 
 to_pickle = True
 
-"""## DataLoader 
-
-The dataset is split into train/test with indexes mask
-
-In train the data is reported with a mask of *x* items selected randomly between positive and negative with a proportion 1:2
-
-In test the data is reported with 3 masks of items with less, middle and top popolarity
-"""
-
 
 def load_dataset(fname, to_pickle=True):
     if to_pickle:
@@ -84,11 +79,8 @@ def load_dataset(fname, to_pickle=True):
             return json.load(fp)
 
 
-import gc
-
-
 class DataLoader:
-    def __init__(self, file_tr, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000):
+    def __init__(self, file_tr, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False):
 
         dataset = load_dataset(file_tr)
 
@@ -97,7 +89,6 @@ class DataLoader:
         self.thresholds = dataset['thresholds']
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
-        self.chunk_size = chunk_size
 
         # IMPROVEMENT
         self.low_pop = len([i for i in self.item_popularity if i <= self.thresholds[0]])
@@ -116,9 +107,6 @@ class DataLoader:
         gamma = self.pos_neg_ratio
         # gamma = 1
         self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
-
-        # self.frequencies = [int(round(sqrt(self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
-        # self.double_frequencies = [self.max_popularity * (self.pos_neg_ratio / min(p, self.max_popularity)) for p in self.item_popularity]
 
         self.max_width = -1
 
@@ -146,11 +134,6 @@ class DataLoader:
         print('phase 2: Generating training masks...')
 
         for tag in ('train', 'validation', 'test'):
-            # print('LC > tag:', tag)
-            # print('LC > self.neg:', self.neg)
-            # print('LC > self.neg[tag]:', self.neg[tag])
-            # print('LC > self.size[tag]:', self.size[tag])
-
             self._generate_mask_tr(tag)
             print('type(self.data[tag])', type(self.data[tag]))
             print('SET {}, shape {}, positives {}'.format(tag.upper(), self.data[tag].shape, self.data[tag].sum()))
@@ -163,49 +146,24 @@ class DataLoader:
         print('Done.')
 
     def _generate_mask_tr(self, tag):
-
-        # IMPROVED VERSION
-        # TODO replace self.max_width with self.chunk_size
-        print('self.max_width:', self.max_width)
-        print('self.chunk_size:', self.chunk_size)
-
-        # self.mask[tag] = lil_matrix((self.size[tag], self.chunk_size))
-        # pos_temp = lil_matrix((self.size[tag], self.chunk_size))
-        # neg_temp = lil_matrix((self.size[tag], self.chunk_size))
-
         self.mask[tag] = np.zeros((self.size[tag], self.max_width))
         pos_temp = np.zeros((self.size[tag], self.max_width))
         neg_temp = np.zeros((self.size[tag], self.max_width))
 
         for row in range(self.size[tag]):
-
-            if row % 1000 == 0:
-                print('generate_mask_tr: user {}/{}'.format(row, self.size[tag]))
-
             self.mask[tag][row, :len(self.pos[tag][row])] = [1] * len(self.pos[tag][row])
-            if row % 1000 == 0:
-                # print('Updating pos...')
-                pass
             pos_temp[row, :len(self.pos[tag][row])] = self.pos[tag][row]
-            if row % 1000 == 0:
-                # print('Updating neg...')
-                pass
             neg_temp[row, :len(self.neg[tag][row])] = self.neg[tag][row]
 
-        print('generate_mask_tr almost completed...', tag)
         self.pos[tag] = pos_temp
         self.neg[tag] = neg_temp
-        print('generate_mask_tr completed!', tag)
 
     def _generate_mask_te(self, tag):
         self.mask_rank[tag] = np.zeros((self.size[tag], self.n_items), dtype=np.int8)
 
         for row in np.arange(self.size[tag]):
-            if row % 1000 == 0:
-                print('generate_mask_te: user {}/{}'.format(row, self.size[tag]))
             pos = self.pos_rank[tag][row]
             self.mask_rank[tag][row, pos] = 1
-        print('generate_mask_te completed!', tag)
 
     def _initialize(self):
         self._count_positive = {'train': None, 'validation': None, 'test': None}
@@ -236,6 +194,10 @@ class DataLoader:
         training_data = dataset['training_data']
         validation_data = dataset['validation_data']
         test_data = dataset['test_data']
+
+        print('LEN TEST:', len(test_data.keys()))
+
+        # print('LEN TEST:',test_data)
         '''
         for user_id in training_data:
             pos, neg = training_data[user_id]
@@ -265,17 +227,6 @@ class DataLoader:
 
             pos, neg = self._generate_pairs(pos)
 
-            # print('pos:',pos)
-            # print('neg:',neg)
-
-            # for start_idx in range(0, len(pos), self.chunk_size):
-            #   end_idx = min(start_idx + self.chunk_size, len(pos))
-            #  temp_pos = pos[start_idx:end_idx]
-            # temp_neg = neg[start_idx:end_idx]
-
-            # print('temp_pos:', temp_pos)
-            # print('temp_neg:', temp_neg)
-
             train.append(items_np)
             self.pos['train'].append(pos)
             self.neg['train'].append(neg)
@@ -283,12 +234,8 @@ class DataLoader:
         print('self.max_width:', self.max_width)
 
         self.data['train'] = np.array(train, dtype=np.int8)
-        # self.data['train'] = np.memmap('train_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(train), self.n_items))
         self.data['train'][:] = train[:]
         self.size['train'] = len(train)
-
-        # del train
-        gc.collect()
 
         for user_id in validation_data:
             if user_id % 1000 == 0:
@@ -305,11 +252,6 @@ class DataLoader:
 
             pos, neg = self._generate_pairs(positives_tr)
 
-            # for start_idx in range(0, len(pos), self.chunk_size):
-            #   end_idx = min(start_idx + self.chunk_size, len(pos))
-            #  temp_pos = pos[start_idx:end_idx]
-            # temp_neg = neg[start_idx:end_idx]
-
             validation.append(items_np)
 
             self.pos['validation'].append(pos)
@@ -320,11 +262,8 @@ class DataLoader:
 
         if len(validation) > 0:
             self.data['validation'] = np.array(validation, dtype=np.int8)
-            # self.data['validation'] = np.memmap('validation_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(validation), self.n_items))
             self.data['validation'][:] = validation[:]
             self.size['validation'] = len(validation)
-            # del validation
-            gc.collect()
 
         for user_id in test_data:
             if user_id % 1000 == 0:
@@ -341,11 +280,6 @@ class DataLoader:
 
             pos, neg = self._generate_pairs(positives_tr)
 
-            # for start_idx in range(0, len(pos), self.chunk_size):
-            #   end_idx = min(start_idx + self.chunk_size, len(pos))
-            #  temp_pos = pos[start_idx:end_idx]
-            # temp_neg = neg[start_idx:end_idx]
-
             test.append(items_np)
 
             self.pos['test'].append(pos)
@@ -356,11 +290,8 @@ class DataLoader:
 
         if len(test) > 0:
             self.data['test'] = np.array(test, dtype=np.int8)
-            # self.data['test'] = np.memmap('test_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(test), self.n_items))
             self.data['test'][:] = test[:]
             self.size['test'] = len(test)
-            # del test
-            gc.collect()
 
     def _sample_negatives(self, pos, size):
         all_items = set(range(len(self.item_popularity)))
@@ -374,7 +305,6 @@ class DataLoader:
         for item in pos:
             if self.use_popularity:
                 frequency = self.frequencies[item]
-                # frequency = self.pos_neg_ratio
             else:
                 frequency = self.pos_neg_ratio
             positives[0:0] = [item] * frequency
@@ -672,6 +602,7 @@ class rvae_loss(nn.Module):
         n_llk = self.log_p(x, y, **args)
 
         loss = n_llk + anneal * self.kld(mu, logvar)
+        # loss = n_llk + self.kld(mu, logvar)
 
         return loss
 
@@ -686,19 +617,19 @@ class rvae_rank_pair_loss(rvae_loss):
         y1 = torch.gather(y, 1, (pos_items).long()) * mask
         y2 = torch.gather(y, 1, (neg_items).long()) * mask
 
-        # freq_pos = self.frequencies[pos_items.long()].float()
-        # freq_neg = self.frequencies[neg_items.long()].float()
-
         pop_pos = self.popularity[pos_items.long()]
         pop_neg = self.popularity[neg_items.long()]
 
         filter_pos = (pop_pos <= self.thresholds[0]).float()  # low
         filter_neg = (pop_neg > self.thresholds[0]).float()  # low
-        # filter_pos = (self.thresholds[0] < pop_pos).float() * (pop_pos <= self.thresholds[1]).float()  # med
-        # filter_pos = (self.thresholds[1] <= pop_pos).float()  # high
 
-        neg_ll = -torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
-        # neg_ll = - torch.sum(filter_pos * filter_neg * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        # freq_pos = self.frequencies[pos_items.long()].float()
+        # freq_neg = self.frequencies[neg_items.long()].float()
+
+        # neg_ll = - torch.sum(self.logsigmoid((1 - pop_pos) * y1 - y2) * weight) / mask.sum()
+        # neg_ll = - torch.sum(filter_pos * filter_neg*self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        # neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
 
         del pop_pos
         del pop_neg
@@ -750,8 +681,8 @@ n_items = trainloader.n_items
 # SETTINGS
 settings = types.SimpleNamespace()
 settings.dataset_name = os.path.split(data_dir)[-1]
-settings.p_dims = [200, 600, n_items]
-# settings.p_dims = [1, 5, 10, 50, 100, 200, 600, n_items]
+# settings.p_dims = [200, 600, n_items]
+
 settings.batch_size = 1024
 settings.weight_decay = 0.0
 settings.learning_rate = 1e-3
@@ -847,7 +778,6 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     model.eval()
     accumulator = MetricAccumulator()
     result = collections.defaultdict(float)
-
     batch_num = 0
     n_users_train = 0
     # n_positives_predicted = np.zeros(3)
@@ -890,22 +820,17 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     return result
 
 
-"""# Run"""
-
-# %%capture output
 torch.set_printoptions(profile="full")
 
-n_epochs = 200
+n_epochs = 50
 update_count = 0
-settings.batch_size = 1024  # 256
-settings.learning_rate = 1e-3  # 1e-5
 settings.optim = 'adam'
 settings.scale = 1000
 settings.use_popularity = True
 settings.p_dims = [200, 600, n_items]
+
 print(settings.p_dims)
 model = MultiVAE(settings.p_dims)
-# model = MultiVAE([20, 10])
 model = model.to(device)
 
 criterion = rvae_rank_pair_loss(popularity=popularity if settings.use_popularity else None,
@@ -930,27 +855,29 @@ try:
     else:
         optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08, weight_decay=settings.weight_decay, momentum=0, centered=False)
 
-    for epoch in range(1, n_epochs + 1):
-        epoch_start_time = time.time()
-        train_loss = train(trainloader, epoch, optimizer)
-        result = evaluate(trainloader, popularity)
+    if do_training:
+        for epoch in range(1, n_epochs + 1):
+            epoch_start_time = time.time()
+            train_loss = train(trainloader, epoch, optimizer)
+            result = evaluate(trainloader, popularity)
 
-        result['train_loss'] = train_loss
-        stat_metric.append(result)
+            result['train_loss'] = train_loss
+            stat_metric.append(result)
 
-        print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
-        ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in ('train_loss', 'loss', 'hitrate@5', 'popularity_hitrate@5', 'hitrate_by_pop@5', 'luciano_stat_by_pop@5')])
-        ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
-        ls = len(ss)
-        print('-' * ls)
-        print(ss)
-        print('-' * ls)
+            print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
+            ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in
+                             ('train_loss', 'loss', 'hitrate@5', 'hitrate_by_pop@5', 'luciano_weighted_stat@5', 'luciano_stat_by_pop@5')])
+            ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
+            ls = len(ss)
+            print('-' * ls)
+            print(ss)
+            print('-' * ls)
 
-        # Save the model if the n100 is the best we've seen so far.
-        if best_loss > result['loss']:
-            with open(file_model, 'wb') as f:
-                torch.save(model, f)
-            best_loss = result['loss']
+            # Save the model if the n100 is the best we've seen so far.
+            if best_loss > result['loss']:
+                with open(file_model, 'wb') as f:
+                    torch.save(model, f)
+                best_loss = result['loss']
 
 except KeyboardInterrupt:
     print('-' * 89)
@@ -958,59 +885,62 @@ except KeyboardInterrupt:
 
 # output.show()
 
+if not do_training and trained_model_path is not None:
+    file_model = trained_model_path
+
 with open(file_model, 'rb') as f:
     model = torch.load(f)
 
 """# Training stats"""
+if do_training:
+    # print(f'K = {settings.gamma_k}')
+    print('\n'.join([f'{k:<23}{v}' for k, v in sorted(stat_metric[-1].items())]))
 
-# print(f'K = {settings.gamma_k}')
-print('\n'.join([f'{k:<23}{v}' for k, v in sorted(stat_metric[-1].items())]))
+    # LOSS
+    lossTrain = [x['train_loss'] for x in stat_metric]
+    lossTest = [x['loss'] for x in stat_metric]
 
-# LOSS
-lossTrain = [x['train_loss'] for x in stat_metric]
-lossTest = [x['loss'] for x in stat_metric]
+    lastHitRate = [x['hitrate@5'] for x in stat_metric]
 
-lastHitRate = [x['hitrate@5'] for x in stat_metric]
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
+    ax1.plot(lossTrain, color='b', )
+    # ax1.set_yscale('log')
+    ax1.set_title('Train')
 
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
-ax1.plot(lossTrain, color='b', )
-# ax1.set_yscale('log')
-ax1.set_title('Train')
+    ax2.plot(lossTest, color='r')
+    # ax2.set_yscale('log')
+    ax2.set_title('Validation')
 
-ax2.plot(lossTest, color='r')
-# ax2.set_yscale('log')
-ax2.set_title('Validation')
+    ax3.plot(lastHitRate)
+    ax3.set_title('HitRate@5')
 
-ax3.plot(lastHitRate)
-ax3.set_title('HitRate@5')
+    fig, axes = plt.subplots(4, 3, figsize=(20, 20))
 
-fig, axes = plt.subplots(4, 3, figsize=(20, 20))
+    axes = axes.ravel()
+    i = 0
 
-axes = axes.ravel()
-i = 0
-
-for k in top_k:
-    hitRate = [x[f'hitrate@{k}'] for x in stat_metric]
-
-    ax = axes[i]
-    i += 1
-
-    ax.plot(hitRate)
-    ax.set_title(f'HitRate@{k}')
-
-for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [x[f'hitrate@{k}'] for x in stat_metric]
 
         ax = axes[i]
         i += 1
 
         ax.plot(hitRate)
-        ax.set_title(f'{name} hitrate_by_pop@{k}')
+        ax.set_title(f'HitRate@{k}')
 
-plt.show();
+    for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
+        for k in top_k:
+            hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
-"""# Test stats"""
+            ax = axes[i]
+            i += 1
+
+            ax.plot(hitRate)
+            ax.set_title(f'{name} hitrate_by_pop@{k}')
+
+    plt.show();
+
+    """# Test stats"""
 
 model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
