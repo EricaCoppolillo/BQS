@@ -718,7 +718,7 @@ class EnsembleMultiVAE(nn.Module):
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
 
-        y_e = z_a + z_b * 0.35  # ml1m:0.35 - pinterest:0.4
+        y_e = z_a + z_b * 0.36  # ml1m:0.36 - pinterest:0.4
 
         return y_e
 
