@@ -42,7 +42,7 @@ if CUDA:
 else:
     print('cuda not available')
 
-do_training = False
+do_training = True
 trained_model_path = './data/ml-1m/popularity_low/best_model.pth'
 
 dataset_name = 'ml-1m'
@@ -674,7 +674,7 @@ class rvae_focal_loss(rvae_loss):
 
 """# Train and test"""
 
-trainloader = DataLoader(dataset_file, use_popularity=True)
+trainloader = DataLoader(dataset_file, use_popularity=False)
 # dataloader = DataLoaderDummy(None)
 n_items = trainloader.n_items
 
@@ -798,7 +798,6 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
             x_input = x_tensor * (1 - mask_te)
             y, mu, logvar = model(x_input, True)
 
-            #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
             loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask)
 
             result['loss'] += loss.item()
