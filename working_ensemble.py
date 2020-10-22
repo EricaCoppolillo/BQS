@@ -26,7 +26,7 @@ torch.backends.cudnn.benchmark = False
 from evaluation import MetricAccumulator
 
 if 'CUDA_VISIBLE_DEVICES' not in os.environ:
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 USE_CUDA = True
 
@@ -47,6 +47,8 @@ else:
 # dataset_name = 'pinterest'
 # dataset_name = 'epinions'
 dataset_name = 'citeulike-a'
+
+print('dataset_name:', dataset_name)
 
 data_dir = os.path.expanduser('./data')
 
@@ -304,7 +306,7 @@ class DataLoader:
         self.data['train'][:] = train[:]
         self.size['train'] = len(train)
 
-        # del train
+        del train
         gc.collect()
 
         for user_id in validation_data:
@@ -340,7 +342,8 @@ class DataLoader:
             # self.data['validation'] = np.memmap('validation_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(validation), self.n_items))
             self.data['validation'][:] = validation[:]
             self.size['validation'] = len(validation)
-            # del validation
+
+            del validation
             gc.collect()
 
         for user_id in test_data:
@@ -376,7 +379,8 @@ class DataLoader:
             # self.data['test'] = np.memmap('test_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(test), self.n_items))
             self.data['test'][:] = test[:]
             self.size['test'] = len(test)
-            # del test
+
+            del test
             gc.collect()
 
     def _sample_negatives(self, pos, size):
@@ -686,7 +690,7 @@ class EnsembleMultiVAE(nn.Module):
         # self.layers = nn.ModuleList((nn.Linear(n_items * 4, n_items * 3),
         #                             nn.Linear(n_items * 3, n_items * 2),
         #                             nn.Linear(n_items * 2, n_items)))
-
+        '''
         self.layers = nn.ModuleList((nn.Linear(n_items * 5, n_items * 4),
                                      nn.Linear(n_items * 4, n_items * 3),
                                      nn.Linear(n_items * 3, n_items * 2),
@@ -705,6 +709,7 @@ class EnsembleMultiVAE(nn.Module):
         self.bn_b_1 = torch.nn.BatchNorm1d(n_items)
         self.alpha = torch.nn.Parameter(torch.tensor(0.33, dtype=torch.float32, device=device))
         self.beta = torch.nn.Parameter(torch.tensor(0.33, dtype=torch.float32, device=device))
+        '''
 
     def normalize(self, tensor):
         min_v = torch.min(tensor)
@@ -719,7 +724,7 @@ class EnsembleMultiVAE(nn.Module):
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
 
-        y_e = z_a + z_b * 0.36  # ml1m:0.36 - pinterest:0.4
+        y_e = z_a + z_b * 0.25  # ml1m:0.36 - pinterest:0.4
 
         return y_e
 
@@ -898,7 +903,7 @@ def train(dataloader, epoch, optimizer):
             anneal = settings.anneal_cap
 
         # TRAIN on batch
-        optimizer.zero_grad()
+        # optimizer.zero_grad()
         # y, mu, logvar = model(x, y_a, y_b)
         y = model(x, popularity, y_a, y_b)
 
@@ -1007,6 +1012,7 @@ stat_metric = []
 
 print('At any point you can hit Ctrl + C to break out of training early.')
 try:
+    '''
     if settings.optim == 'adam':
         optimizer = torch.optim.Adam(model.parameters(),
                                      lr=settings.learning_rate,
@@ -1017,7 +1023,8 @@ try:
     else:
         optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08,
                                         weight_decay=settings.weight_decay, momentum=0, centered=False)
-
+    '''
+    optimizer = None
     for epoch in range(1, n_epochs + 1):
         epoch_start_time = time.time()
         train_loss = train(trainloader, epoch, optimizer)
