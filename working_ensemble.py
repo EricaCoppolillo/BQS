@@ -41,11 +41,12 @@ if CUDA:
 else:
     print('cuda not available')
 
-dataset_name = 'ml-1m'
+# dataset_name = 'ml-1m'
 # dataset_name = 'ml-20m'
 # dataset_name = 'netflix_sample'
 # dataset_name = 'pinterest'
 # dataset_name = 'epinions'
+dataset_name = 'citeulike-a'
 
 data_dir = os.path.expanduser('./data')
 

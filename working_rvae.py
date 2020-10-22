@@ -45,11 +45,12 @@ else:
 do_training = True
 trained_model_path = './data/ml-1m/popularity_low/best_model.pth'
 
-dataset_name = 'ml-1m'
+# dataset_name = 'ml-1m'
 # dataset_name = 'ml-20m'
 # dataset_name = 'netflix_sample'
 # dataset_name = 'pinterest'
 # dataset_name = 'epinions'
+dataset_name = 'citeulike-a'
 
 data_dir = os.path.expanduser('./data')
 
@@ -313,6 +314,8 @@ class DataLoader:
         self.max_width = max(self.max_width, len(negatives))
 
         return positives, negatives
+
+
 
     def iter(self, batch_size=256, tag='train'):
         """
@@ -628,8 +631,8 @@ class rvae_rank_pair_loss(rvae_loss):
 
         # neg_ll = - torch.sum(self.logsigmoid((1 - pop_pos) * y1 - y2) * weight) / mask.sum()
         # neg_ll = - torch.sum(filter_pos * filter_neg*self.logsigmoid(y1 - y2) * weight) / mask.sum()
-        # neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
-        neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        # neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
 
         del pop_pos
         del pop_neg
@@ -674,7 +677,7 @@ class rvae_focal_loss(rvae_loss):
 
 """# Train and test"""
 
-trainloader = DataLoader(dataset_file, use_popularity=False)
+trainloader = DataLoader(dataset_file, use_popularity=True)
 # dataloader = DataLoaderDummy(None)
 n_items = trainloader.n_items
 
