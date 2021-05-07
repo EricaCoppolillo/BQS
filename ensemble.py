@@ -1,12 +1,3 @@
-'''
-modelli addestrati con:
-epoche = 50
-n_coppie = 4
-uso_frequenze = si
-'''
-
-SEED = 8734
-
 import collections
 import gc
 import json
@@ -16,23 +7,24 @@ import random
 import time
 import types
 from datetime import datetime
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+from evaluation import MetricAccumulator
+
+SEED = 8734
 
 np.random.seed(SEED)
 random.seed(SEED)
-
 torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 USE_CUDA = True
-
 CUDA = USE_CUDA and torch.cuda.is_available()
 
 device = torch.device("cuda" if CUDA else "cpu")
@@ -40,15 +32,16 @@ device = torch.device("cuda" if CUDA else "cpu")
 print(torch.__version__)
 
 if CUDA:
-    print('run on cuda %s' % os.environ['CUDA_VISIBLE_DEVICES'])
+    print('GPU')
 else:
-    print('cuda not available')
+    print('CPU')
 
-dataset_name = 'ml-1m'
+# dataset_name = 'ml-1m'
 # dataset_name = 'ml-20m'
 # dataset_name = 'netflix_sample'
 # dataset_name = 'pinterest'
 # dataset_name = 'epinions'
+dataset_name = 'citeulike-a'
 
 data_dir = os.path.expanduser('./data')
 
@@ -62,6 +55,7 @@ result_dir = os.path.join(data_dir, 'results')
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
+# TODO: include learning params
 file_model = os.path.join(result_dir, 'best_model.pth')
 file_train = os.path.join(proc_dir, 'train_glob')
 
@@ -87,29 +81,23 @@ def load_dataset(fname, to_pickle=True):
 
 
 class DataLoader:
-    def __init__(self, data_dir, pos_neg_ratio=1, negatives_in_test=100, use_popularity=False, chunk_size=1000):
+    def __init__(self, data_dir, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000):
         # loading models
         print('loading ensemble models...')
-        low_dir = os.path.join(data_dir, 'popularity_low')
-        med_dir = os.path.join(data_dir, 'popularity_med')
-        high_dir = os.path.join(data_dir, 'popularity_high')
+        baseline_dir = os.path.join(data_dir, 'baseline')
+        popularity_dir = os.path.join(data_dir, 'popularity_low')
 
-        low_file_model = os.path.join(low_dir, 'best_model.pth')
-        med_file_model = os.path.join(med_dir, 'best_model.pth')
-        high_file_model = os.path.join(high_dir, 'best_model.pth')
+        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
+        popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
 
-        with open(low_file_model, 'rb') as f:
-            self.low_model = torch.load(f)
+        with open(baseline_file_model, 'rb') as f:
+            self.baseline_model = torch.load(f)
 
-        with open(med_file_model, 'rb') as f:
-            self.med_model = torch.load(f)
+        with open(popularity_file_model, 'rb') as f:
+            self.popularity_model = torch.load(f)
 
-        with open(high_file_model, 'rb') as f:
-            self.high_model = torch.load(f)
-
-        self.low_model.eval()
-        self.med_model.eval()
-        self.high_model.eval()
+        self.baseline_model.eval()
+        self.popularity_model.eval()
         print('ensemble models loaded!')
 
         dataset_file = os.path.join(data_dir, 'data_rvae')
@@ -138,7 +126,8 @@ class DataLoader:
 
         gamma = self.pos_neg_ratio
         # gamma = 1
-        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
+        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
+                            self.item_popularity]
 
         # self.frequencies = [int(round(sqrt(self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
         # self.double_frequencies = [self.max_popularity * (self.pos_neg_ratio / min(p, self.max_popularity)) for p in self.item_popularity]
@@ -411,11 +400,10 @@ class DataLoader:
         for batch_idx, (x, pos, neg, mask) in enumerate(self.iter(batch_size=batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
 
-            y_a, _, _ = self.low_model(x_tensor, True)
-            y_b, _, _ = self.med_model(x_tensor, True)
-            y_c, _, _ = self.high_model(x_tensor, True)
+            y_a, _, _ = self.baseline_model(x_tensor, True)
+            y_b, _, _ = self.popularity_model(x_tensor, True)
 
-            yield x, pos, neg, mask, y_a, y_b, y_c
+            yield x, pos, neg, mask, y_a, y_b
 
     def iter(self, batch_size=256, tag='train'):
         """
@@ -448,17 +436,17 @@ class DataLoader:
 
     def iter_test_ensemble(self, batch_size=256, tag='train'):
 
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(self.iter_test(batch_size=batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
+                self.iter_test(batch_size=batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             mask_te_tensor = naive_sparse2tensor(mask_te).to(device)
 
             x_input = x_tensor * (1 - mask_te_tensor)
 
-            y_a, _, _ = self.low_model(x_input, True)
-            y_b, _, _ = self.med_model(x_input, True)
-            y_c, _, _ = self.high_model(x_input, True)
+            y_a, _, _ = self.baseline_model(x_input, True)
+            y_b, _, _ = self.popularity_model(x_input, True)
 
-            yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b, y_c
+            yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b
 
     def iter_test(self, batch_size=256, tag='test'):
         """
@@ -561,7 +549,8 @@ def sigmoid(z):
 def y_aux_popularity(x):
     f = 1 / (settings.metrics_beta * np.sqrt(2 * np.pi))
     y = np.tanh(settings.metrics_alpha * x) + \
-        settings.metrics_scale * f * np.exp(-1 / (2 * (settings.metrics_beta ** 2)) * (x - settings.metrics_percentile) ** 2)
+        settings.metrics_scale * f * np.exp(
+        -1 / (2 * (settings.metrics_beta ** 2)) * (x - settings.metrics_percentile) ** 2)
     return y
 
 
@@ -578,82 +567,6 @@ def y_position(x, cutoff):
 def y_custom(popularity, position, cutoff):
     y = y_popularity(popularity) * y_position(position, cutoff)
     return y
-
-
-def compute_metric(x, y, pos, neg, popularity, popularity_thresholds, top_k=10):
-    """
-    Compute metric:
-    - hitrate
-    - hitrate per popularity
-
-    :param x: user preferences, BS x items
-    :param y: user predictions, BS x items
-    :param mask: user selected preferences, BS x 100
-    :param popularity: dict of item popularity (normalized)
-    :param top_k: top k items to select ranked by score
-    :return: hitrate, popularity hitrate, total_positives(low,medium,high)
-    """
-    assert min([len(r) for r in neg]) >= top_k and top_k > 0, f"fail with top_k = {top_k} and neg = {[len(r) for r in neg]}"
-    assert len(popularity) == y.shape[-1], f'{len(popularity)} != {y.shape[-1]}'
-    avg_hr = 0
-    total_positives = np.zeros(3)
-    avg_hits = np.zeros(3)
-
-    for i in range(y.shape[0]):
-        input_idx = np.where(x[i, :] == 1)[0]
-        score = y[i, :]
-
-        viewed_item = set(input_idx)
-        # print('LC > viewed_item:',viewed_item)
-        positive_items = set(pos[i])
-        negative_items = neg[i]
-        neg_scores = sorted(score[negative_items].tolist(), reverse=True)
-
-        # Tutti i positivi predetti meno quelli visti
-        predicted_item = positive_items - viewed_item
-        hit = 0
-        hit_pop = [0, 0, 0]
-        hit_pop_tot = [0, 0, 0]
-
-        for pos_item in predicted_item:
-            score_pos = score[pos_item]
-
-            score_top_k = neg_scores[top_k - 1]
-
-            if score_pos > score_top_k:
-                hit += 1
-
-            # popularity
-            current_popularity = popularity[pos_item]
-
-            if current_popularity <= popularity_thresholds[0]:
-
-                hit_pop_tot[0] += 1
-                if score_pos > score_top_k:
-                    hit_pop[0] += 1
-
-            elif popularity_thresholds[0] < current_popularity <= popularity_thresholds[1]:
-
-                hit_pop_tot[1] += 1
-                if score_pos > score_top_k:
-                    hit_pop[1] += 1
-
-            else:  # current_popularity > popularity_thresholds[1]
-
-                hit_pop_tot[2] += 1
-                if score_pos > score_top_k:
-                    hit_pop[2] += 1
-
-        assert hit <= len(predicted_item), f'{hit} / {len(predicted_item)}'
-        assert sum(hit_pop) == hit, f'hit count error {hit} != {hit_pop}'
-        assert len(predicted_item) == sum(hit_pop_tot), f'hit count error {len(predicted_item)} != {hit_pop_tot}'
-        # avg_hr += hit / len(predicted_item)
-        # avg_hits += np.array([a / b if a > 0 else 0 for a, b in zip(hit_pop, hit_pop_tot)])
-        avg_hr += hit
-        avg_hits += np.array(hit_pop)
-        total_positives += np.array(hit_pop_tot)
-
-    return avg_hr, avg_hits, total_positives
 
 
 class MultiVAE(nn.Module):
@@ -783,6 +696,11 @@ class EnsembleMultiVAE(nn.Module):
 
         self.log_sigmoid = torch.nn.LogSigmoid()
 
+        self.bn_a_1 = torch.nn.BatchNorm1d(n_items)
+        self.bn_b_1 = torch.nn.BatchNorm1d(n_items)
+        self.alpha = torch.nn.Parameter(torch.tensor(0.33, dtype=torch.float32, device=device))
+        self.beta = torch.nn.Parameter(torch.tensor(0.33, dtype=torch.float32, device=device))
+
     def normalize(self, tensor):
         min_v = torch.min(tensor)
         range_v = torch.max(tensor) - min_v
@@ -792,84 +710,12 @@ class EnsembleMultiVAE(nn.Module):
             normalised = torch.zeros(tensor.size())
         return normalised
 
-    def forward(self, x, popularity, y_a, y_b, y_c, predict=False):
-        # print('popularity.repeat(x.size()[0], 1).size():',popularity.repeat(x.size()[0], 1).size())
-        # print('popularity.repeat(x.size()[0], 1):', popularity.repeat(x.size()[0], 1))
+    def forward(self, x, popularity, y_a, y_b, predict=False):
 
-        '''
-        y_e = torch.cat((x, popularity.repeat(x.size()[0], 1), y_a, y_b, y_c), 1)
+        z_a = torch.softmax(y_a, 1)
+        z_b = torch.softmax(y_b, 1)
 
-        for _, layer in enumerate(self.layers):
-            y_e = layer(y_e)
-
-
-        n_a = self.normalize(self.s1(y_a))
-        n_b = self.normalize(self.s2(y_b))
-        n_c = self.normalize(self.s3(y_c))
-        '''
-        popularity=popularity.repeat(x.size()[0], 1)
-        zeros = torch.zeros(y_a.size()).to(device)
-        ones = torch.ones(y_a.size()).to(device)
-
-
-
-        t_min = 0.30
-        t_max = 0.80
-
-        # n_a = self.s1(y_a * (1 - x))
-        # n_b = self.s1(y_b * (1 - x))
-        # n_c = self.s1(y_c * (1 - x))
-
-        #n_a = self.normalize(self.s1(y_a))
-        #n_b = self.normalize(self.s1(y_b))
-        #n_c = self.normalize(self.s1(y_c))
-
-        #n_a = self.normalize(y_a* (1 - x))
-        #n_b = self.normalize(y_b* (1 - x))
-        #n_c = self.normalize(y_c* (1 - x))
-
-        n_a = self.normalize(y_a)
-        n_b = self.normalize(y_b)
-        n_c = self.normalize(y_c)
-
-
-        #n_a = torch.where(t_min > n_a, zeros, n_a)
-        #n_b = torch.where(t_min > n_b, zeros, n_b)
-        #n_c = torch.where(t_min > n_c, zeros, n_c)
-
-
-        n_a = torch.where(popularity <= thresholds[0], n_a, zeros)
-        n_b = torch.where(popularity > thresholds[0], n_b, zeros)
-        n_b = torch.where(popularity <= thresholds[1], n_b, zeros)
-        n_c = torch.where(popularity > thresholds[1], n_c, zeros)
-
-
-
-
-        # n_a = self.s1(y_a*(1-x))
-        # n_b = self.s2(y_b*(1-x))
-        # n_c = self.s3(y_c*(1-x))
-
-        # n_a = self.s1(y_a)
-        # n_b = self.s2(y_b)
-        # n_c = self.s3(y_c)
-
-        # print(x[0, :100])
-        # print(n_a[0, :100])
-        # print(y_b[0, :10])
-        # print(y_c[0, :10])
-
-        print('ya min', torch.min(n_a))
-        print('ya max', torch.max(n_a))
-
-        print('yb min', torch.min(n_b))
-        print('yb max', torch.max(n_b))
-
-        print('yc min', torch.min(n_c))
-        print('yc max', torch.max(n_c))
-
-        y_e = n_a + n_b + n_c
-        y_e = torch.where(y_e > 1, ones, y_e)
+        y_e = z_a + z_b * 0.4
 
         return y_e
 
@@ -931,24 +777,19 @@ class rvae_rank_pair_loss(rvae_loss):
 
     def log_p(self, x, y, pos_items, neg_items, mask):
         '''
-        pos
-
-
-        '''
         weight = mask
 
         y1 = torch.gather(y, 1, (pos_items).long()) * mask
         y2 = torch.gather(y, 1, (neg_items).long()) * mask
 
-        freq_pos = self.frequencies[pos_items.long()].float()
-        freq_neg = self.frequencies[neg_items.long()].float()
-        # print('FREQ:',freq_pos[:10])
-
-        # neg_ll = -torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
         neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
-        # neg_ll = - torch.sum(self.logsigmoid(y1 * freq_pos.float() - y2 * freq_neg.float()) * weight) / mask.sum()
 
-        return neg_ll
+        del y1
+        del y2
+        torch.cuda.empty_cache()
+        '''
+        return 0
+        # return neg_ll
 
 
 class rvae_focal_loss(rvae_loss):
@@ -984,8 +825,8 @@ class rvae_focal_loss(rvae_loss):
 
 """# Train and test"""
 
-trainloader = DataLoader(data_dir, use_popularity=False)
-
+trainloader = DataLoader(data_dir, use_popularity=True)
+# dataloader = DataLoaderDummy(None)
 n_items = trainloader.n_items
 
 # SETTINGS
@@ -1038,14 +879,13 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
-    for batch_idx, (x, pos, neg, mask, y_a, y_b, y_c) in enumerate(dataloader.iter_ensemble(batch_size=settings.batch_size)):
+    for batch_idx, (x, pos, neg, mask, y_a, y_b) in enumerate(dataloader.iter_ensemble(batch_size=settings.batch_size)):
         # for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=settings.batch_size)):
 
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
         mask = naive_sparse2tensor(mask).to(device)
-        popularity = naive_sparse2tensor(dataloader.item_popularity).to(device)
 
         update_count += 1
         if settings.total_anneal_steps > 0:
@@ -1055,15 +895,15 @@ def train(dataloader, epoch, optimizer):
 
         # TRAIN on batch
         optimizer.zero_grad()
-
-        y = model(x, popularity, y_a, y_b, y_c)
+        # y, mu, logvar = model(x, y_a, y_b)
+        y = model(x, popularity, y_a, y_b)
 
         loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask)
         # loss.backward()
         # optimizer.step()
 
-        train_loss += loss.item()
-        train_loss_cumulative += loss.item()
+        train_loss += 0  # loss.item()
+        train_loss_cumulative += 0  # loss.item()
 
         update_count += 1
 
@@ -1089,61 +929,46 @@ top_k = (1, 5, 10)
 def evaluate(dataloader, normalized_popularity, tag='validation'):
     # Turn on evaluation mode
     model.eval()
+    accumulator = MetricAccumulator()
     result = collections.defaultdict(float)
     batch_num = 0
     n_users_train = 0
-    n_positives_predicted = np.zeros(3)
     result['train_loss'] = 0
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b, y_c) in enumerate(dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
+                dataloader.iter_test_ensemble(batch_size=settings.batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
             mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
-            popularity = naive_sparse2tensor(dataloader.item_popularity).to(device)
 
             batch_num += 1
             n_users_train += x_tensor.shape[0]
 
             x_input = x_tensor * (1 - mask_te)
 
-            y = model(x_input, popularity, y_a, y_b, y_c, True)
+            y = model(x_input, popularity, y_a, y_b, True)
 
             loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
 
-            result['loss'] += loss.item()
+            result['loss'] += 0  # loss.item()
 
             recon_batch_cpu = y.cpu().numpy()
 
             for k in top_k:
-                out = compute_metric(x_input.cpu().numpy(),
-                                     recon_batch_cpu,
-                                     pos_te, neg_te,
-                                     popularity,
-                                     dataloader.thresholds,
-                                     k)
-                hitrate, popularity_hitrate, total_items = out
+                accumulator.compute_metric(x_input.cpu().numpy(),
+                                           recon_batch_cpu,
+                                           pos_te, neg_te,
+                                           popularity,
+                                           dataloader.thresholds,
+                                           k)
 
-                result[f'hitrate@{k}'] += hitrate
-                result[f'popularity_hitrate@{k}'] += popularity_hitrate
-                # aggiornamento vettore del numero di items ripartiti per popolarita (l, m, h)
-                if k == top_k[0]:
-                    n_positives_predicted += total_items
-
-    # last metric is str
-    # n_users_pop = dataloader.get_users_counts_by_cat(tag)
-    for i, k in enumerate(top_k):
-        # result[f'hitrate@{k}'] = result[f'hitrate@{k}'] / n_users_train
-        result[f'hitrate@{k}'] = result[f'hitrate@{k}'] / n_positives_predicted.sum()
-
-        hits = result[f'popularity_hitrate@{k}']
-        # result[f'popularity_hitrate@{k}'] = np.around(np.array(hits) / np.array(n_users_pop), 2)
-        result[f'popularity_hitrate@{k}'] = np.around(np.array(hits) / n_positives_predicted, 2)
-        result[f'popularity_hitrate@{k}'] = ', '.join([f'{x}' for x in result[f'popularity_hitrate@{k}']])
-
+    for k, values in accumulator.get_metrics().items():
+        for v in values.metric_names():
+            result[f'{v}@{k}'] = values[v]
     return result
 
 
@@ -1155,7 +980,8 @@ torch.set_printoptions(profile="full")
 n_epochs = 1
 update_count = 0
 settings.batch_size = 1024  # 256
-settings.learning_rate = 1e-4  # 1e-5
+# settings.learning_rate = 1e-4  # 1e-5
+settings.learning_rate = 1e-2  # 1e-5
 settings.optim = 'adam'
 settings.scale = 1000
 settings.use_popularity = True
@@ -1184,7 +1010,8 @@ try:
         optimizer = torch.optim.SGD(params=model.parameters(), lr=settings.learning_rate, momentum=0.9,
                                     dampening=0, weight_decay=0, nesterov=True)
     else:
-        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08, weight_decay=settings.weight_decay, momentum=0, centered=False)
+        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08,
+                                        weight_decay=settings.weight_decay, momentum=0, centered=False)
 
     for epoch in range(1, n_epochs + 1):
         epoch_start_time = time.time()
@@ -1195,7 +1022,9 @@ try:
         stat_metric.append(result)
 
         print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
-        ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in ('train_loss', 'loss', 'hitrate@5', 'popularity_hitrate@5')])
+        ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if
+                         k in ('train_loss', 'loss', 'hitrate@5', 'hitrate_by_pop@5', 'weighted_luciano_stat@5',
+                               'luciano_stat_by_pop@5')])
         ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
         ls = len(ss)
         print('-' * ls)
@@ -1256,13 +1085,13 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'popularity_hitrate@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
 
         ax.plot(hitRate)
-        ax.set_title(f'{name} popularity_hitrate@{k}')
+        ax.set_title(f'{name} hitrate_by_pop@{k}')
 
 plt.show();
 
@@ -1271,7 +1100,8 @@ plt.show();
 model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
 
-print(f'K = {settings.gamma_k}')
+print('*** TEST RESULTS ***')
+# print(f'K = {settings.gamma_k}')
 print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
 
 """# Save result"""
@@ -1345,13 +1175,13 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'popularity_hitrate@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
 
         ax.plot(hitRate)
-        ax.set_title(f'{name} popularity_hitrate@{k}')
+        ax.set_title(f'{name} hitrate_by_pop@{k}')
 
 plt.savefig(os.path.join(folder_name, 'hr.png'));
 
