@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+
 from evaluation import MetricAccumulator
 
 np.random.seed(SEED)
@@ -25,8 +26,9 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 from evaluation import MetricAccumulator
 
-if 'CUDA_VISIBLE_DEVICES' not in os.environ:
-    os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+
+#if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+#    os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 USE_CUDA = True
 
@@ -37,15 +39,16 @@ device = torch.device("cuda" if CUDA else "cpu")
 print(torch.__version__)
 
 if CUDA:
-    print('run on cuda %s' % os.environ['CUDA_VISIBLE_DEVICES'])
+    print('GPU')
 else:
-    print('cuda not available')
+    print('CPU')
 
-# dataset_name = 'ml-1m'
+#dataset_name = 'ml-1m'
 # dataset_name = 'ml-20m'
 # dataset_name = 'netflix_sample'
-dataset_name = 'pinterest'
-# dataset_name = 'epinions'
+# dataset_name = 'pinterest'
+#dataset_name = 'epinions'
+dataset_name = 'citeulike-a'
 
 data_dir = os.path.expanduser('./data')
 
@@ -715,6 +718,7 @@ class EnsembleMultiVAE(nn.Module):
         return normalised
 
     def forward(self, x, popularity, y_a, y_b, predict=False):
+
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
 
