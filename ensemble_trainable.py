@@ -686,10 +686,35 @@ class MultiVAE(nn.Module):
 class EnsembleMultiVAE(nn.Module):
 
     def __init__(self, n_items):
-        super(EnsembleMultiVAE, self).__init__()
 
+        self.test_print=True
+
+        super(EnsembleMultiVAE, self).__init__()
         self.n_items = n_items
-        self.test_print = True
+
+        # self.layers = nn.ModuleList((nn.Linear(n_items * 4, n_items * 3),
+        #                             nn.Linear(n_items * 3, n_items * 2),
+        #                             nn.Linear(n_items * 2, n_items)))
+        '''
+        self.layers = nn.ModuleList((nn.Linear(n_items * 5, n_items * 4),
+                                     nn.Linear(n_items * 4, n_items * 3),
+                                     nn.Linear(n_items * 3, n_items * 2),
+                                     nn.Linear(n_items * 2, n_items)))
+
+        self.init_weights()
+
+        self.s1 = torch.nn.Softmax(dim=1)
+        self.s2 = torch.nn.Softmax(dim=1)
+        self.s3 = torch.nn.Softmax(dim=1)
+        self.s4 = torch.nn.Softmax(dim=1)
+
+        self.log_sigmoid = torch.nn.LogSigmoid()
+
+        self.bn_a_1 = torch.nn.BatchNorm1d(n_items)
+        self.bn_b_1 = torch.nn.BatchNorm1d(n_items)
+        self.alpha = torch.nn.Parameter(torch.tensor(0.33, dtype=torch.float32, device=device))
+        self.beta = torch.nn.Parameter(torch.tensor(0.33, dtype=torch.float32, device=device))
+        '''
 
     def normalize(self, tensor):
         min_v = torch.min(tensor)
@@ -713,7 +738,7 @@ class EnsembleMultiVAE(nn.Module):
             print('y_b[0][:100]:', y_b[0][:100])
             print('popularity:', popularity[:100])
             print('------------------------------------------------------------------')
-            self.test_print = False
+            self.test_print=False
 
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
@@ -768,7 +793,9 @@ class rvae_loss(nn.Module):
         return KLD
 
     def forward(self, x, y, **args):
+
         loss = self.log_p(x, y, **args)
+
         return loss
 
 
@@ -843,22 +870,89 @@ settings.total_anneal_steps = 200000
 # largest annealing parameter
 settings.anneal_cap = 0.2
 settings.sample_mask = 100
+
 settings.gamma_k = 1000
+
 settings.metrics_alpha = 100
 settings.metrics_beta = .03
 settings.metrics_gamma = 5
 settings.metrics_scale = 1 / 15
 settings.metrics_percentile = .45
+
 popularity = trainloader.item_popularity
 thresholds = trainloader.thresholds
 frequencies = trainloader.frequencies
+
 max_y_aux_popularity = compute_max_y_aux_popularity()
 
 
 def naive_sparse2tensor(data):
     return torch.FloatTensor(data.toarray() if hasattr(data, 'toarray') else data)
 
+
+def train(dataloader, epoch, optimizer):
+    global update_count
+
+    log_interval = int(trainloader.n_users * .7 / settings.batch_size // 4)
+    if log_interval == 0:
+        log_interval = 1
+
+    # Turn on training mode
+    model.train()
+    train_loss = 0.0
+    train_loss_cumulative = 0.0
+    start_time = time.time()
+
+    if epoch == 1:
+        print(f'log every {log_interval} log interval')
+        # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
+
+    for batch_idx, (x, pos, neg, mask, y_a, y_b) in enumerate(dataloader.iter_ensemble(batch_size=settings.batch_size)):
+        # for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=settings.batch_size)):
+
+        x = naive_sparse2tensor(x).to(device)
+        pos_items = naive_sparse2tensor(pos).to(device)
+        neg_items = naive_sparse2tensor(neg).to(device)
+        mask = naive_sparse2tensor(mask).to(device)
+
+        update_count += 1
+        if settings.total_anneal_steps > 0:
+            anneal = min(settings.anneal_cap, 1. * update_count / settings.total_anneal_steps)
+        else:
+            anneal = settings.anneal_cap
+
+        # TRAIN on batch
+        # optimizer.zero_grad()
+        # y, mu, logvar = model(x, y_a, y_b)
+        y = model(x, popularity, y_a, y_b)
+
+        loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask)
+        # loss.backward()
+        # optimizer.step()
+
+        train_loss += 0  # loss.item()
+        train_loss_cumulative += 0  # loss.item()
+
+        update_count += 1
+
+        if batch_idx % log_interval == 0 and batch_idx > 0:
+            elapsed = time.time() - start_time
+            print('| epoch {:3d} | {:4d}/{:4d} batches | ms/batch {:4.2f} | loss {:4.4f}'.format(
+                epoch, batch_idx, len(range(0, dataloader.size['train'], settings.batch_size)),
+                elapsed * 1000 / log_interval,
+                train_loss / log_interval))
+
+            start_time = time.time()
+            train_loss = 0.0
+
+        if CUDA:
+            torch.cuda.empty_cache()
+
+    return train_loss_cumulative / (1 + batch_idx)
+
+
 top_k = (1, 5, 10)
+
 
 def evaluate(dataloader, normalized_popularity, tag='validation'):
     # Turn on evaluation mode
@@ -869,6 +963,8 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     n_users_train = 0
     result['train_loss'] = 0
     result['loss'] = 0
+
+    test_print=True
 
     with torch.no_grad():
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
@@ -903,12 +999,14 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     for k, values in accumulator.get_metrics().items():
         for v in values.metric_names():
             result[f'{v}@{k}'] = values[v]
-
+            
     return result
 
 
 # Run
+
 torch.set_printoptions(profile="full")
+
 n_epochs = 1
 update_count = 0
 settings.batch_size = 1024  # 256
@@ -920,21 +1018,124 @@ settings.use_popularity = True
 settings.p_dims = [200, 600, n_items]
 
 model = EnsembleMultiVAE(n_items)
+
 model = model.to(device)
 
 criterion = rvae_rank_pair_loss(popularity=popularity,
                                 scale=settings.scale,
                                 thresholds=thresholds,
                                 frequencies=frequencies)
+
 best_loss = np.Inf
 
 stat_metric = []
 
+print('At any point you can hit Ctrl + C to break out of training early.')
+try:
+
+    optimizer = None
+
+    '''
+    if settings.optim == 'adam':
+        optimizer = torch.optim.Adam(model.parameters(),
+                                     lr=settings.learning_rate,
+                                     weight_decay=settings.weight_decay)
+    elif settings.optim == 'sgd':
+        optimizer = torch.optim.SGD(params=model.parameters(), lr=settings.learning_rate, momentum=0.9,
+                                    dampening=0, weight_decay=0, nesterov=True)
+    else:
+        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08,
+                                        weight_decay=settings.weight_decay, momentum=0, centered=False)
+    '''
+    for epoch in range(1, n_epochs + 1):
+        epoch_start_time = time.time()
+        train_loss = train(trainloader, epoch, optimizer)
+        result = evaluate(trainloader, popularity)
+
+        result['train_loss'] = train_loss
+        stat_metric.append(result)
+
+        print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
+        ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if
+                         k in ('train_loss', 'loss', 'hitrate@5', 'hitrate_by_pop@5', 'weighted_luciano_stat@5',
+                               'luciano_stat_by_pop@5')])
+        ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
+        ls = len(ss)
+        print('-' * ls)
+        print(ss)
+        print('-' * ls)
+
+        # Save the model if the n100 is the best we've seen so far.
+        if best_loss > result['loss']:
+            with open(file_model, 'wb') as f:
+                torch.save(model, f)
+            best_loss = result['loss']
+
+except KeyboardInterrupt:
+    print('-' * 89)
+    print('Exiting from training early')
+
+# output.show()
+
+with open(file_model, 'rb') as f:
+    model = torch.load(f)
+
+"""# Training stats"""
+
+# print(f'K = {settings.gamma_k}')
+print('\n'.join([f'{k:<23}{v}' for k, v in sorted(stat_metric[-1].items())]))
+
+# LOSS
+lossTrain = [x['train_loss'] for x in stat_metric]
+lossTest = [x['loss'] for x in stat_metric]
+
+lastHitRate = [x['hitrate@5'] for x in stat_metric]
+
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
+ax1.plot(lossTrain, color='b', )
+# ax1.set_yscale('log')
+ax1.set_title('Train')
+
+ax2.plot(lossTest, color='r')
+# ax2.set_yscale('log')
+ax2.set_title('Validation')
+
+ax3.plot(lastHitRate)
+ax3.set_title('HitRate@5')
+
+fig, axes = plt.subplots(4, 3, figsize=(20, 20))
+
+axes = axes.ravel()
+i = 0
+
+for k in top_k:
+    hitRate = [x[f'hitrate@{k}'] for x in stat_metric]
+
+    ax = axes[i]
+    i += 1
+
+    ax.plot(hitRate)
+    ax.set_title(f'HitRate@{k}')
+
+for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
+    for k in top_k:
+        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+
+        ax = axes[i]
+        i += 1
+
+        ax.plot(hitRate)
+        ax.set_title(f'{name} hitrate_by_pop@{k}')
+
+plt.show();
+
 # Test stats
+
 model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
 
 print('*** TEST RESULTS ***')
+# print(f'K = {settings.gamma_k}')
 print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
 
 # Save result
@@ -952,6 +1153,11 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
     for k in dir(settings):
         if not k.startswith('__'):
             fp.write(f'{k} = {getattr(settings, k)}\n')
+
+#    fp.write('\n' * 4)
+#    model_print, _ = torchsummary.summary_string(model, (dataloader.n_items,), device='gpu' if CUDA else 'cpu')
+#    fp.write(model_print)
+
 
 # all results
 with open(os.path.join(run_dir, 'result.json'), 'w') as fp:

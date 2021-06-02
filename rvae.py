@@ -12,17 +12,30 @@ import torch.nn as nn
 import torch
 from evaluation import MetricAccumulator
 
-SEED = 8734
+# DATASETS ----------------------------------------
+CITEULIKE = 'citeulike-a'
+EPINIONS = 'epinions'
+MOVIELENS_1M = 'ml-1m'
+MOVIELENS_20M = 'ml-20m'
+NETFLIX = 'netflix'
+NETFLIX_SAMPLE = 'netflix_sample'
+PINTEREST = 'pinterest'
+# ---------------------------------------------------
 
-BASELINE = False  # Baseline/LowPop model
+
+# SETTINGS ------------------------------------------
+BASELINE = True  # Baseline/LowPop model
+dataset_name = CITEULIKE
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+# ---------------------------------------------------
+
+SEED = 8734
 
 np.random.seed(SEED)
 random.seed(SEED)
 torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 USE_CUDA = True
 CUDA = USE_CUDA and torch.cuda.is_available()
@@ -36,28 +49,26 @@ if CUDA:
 else:
     print('cuda not available')
 
-# dataset_name = 'ml-1m'
-# dataset_name = 'ml-20m'
-# dataset_name = 'netflix_sample'
-# dataset_name = 'pinterest'
-# dataset_name = 'epinions'
-dataset_name = 'citeulike-a'
-
 data_dir = os.path.expanduser('./data')
 
 data_dir = os.path.join(data_dir, dataset_name)
 dataset_file = os.path.join(data_dir, 'data_rvae')
-proc_dir = os.path.join(data_dir, 'pg/')
-if not os.path.exists(proc_dir):
-    os.makedirs(proc_dir)
 
 result_dir = os.path.join(data_dir, 'results')
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
+run_time = datetime.today().strftime('%Y%m%d_%H%M')
+if BASELINE:
+    type_str='baseline'
+else:
+    type_str='popularity_low'
+run_dir = os.path.join(result_dir, f'{type_str}_{run_time}')
+
+os.mkdir(run_dir)
+
 # TODO: include learning params
-file_model = os.path.join(result_dir, 'best_model.pth')
-file_train = os.path.join(proc_dir, 'train_glob')
+file_model = os.path.join(run_dir, 'best_model.pth')
 
 to_pickle = True
 
@@ -98,7 +109,8 @@ class DataLoader:
 
         gamma = self.pos_neg_ratio
         # gamma = 1
-        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
+        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
+                            self.item_popularity]
 
         self.max_width = -1
 
@@ -436,7 +448,8 @@ def sigmoid(z):
 def y_aux_popularity(x):
     f = 1 / (settings.metrics_beta * np.sqrt(2 * np.pi))
     y = np.tanh(settings.metrics_alpha * x) + \
-        settings.metrics_scale * f * np.exp(-1 / (2 * (settings.metrics_beta ** 2)) * (x - settings.metrics_percentile) ** 2)
+        settings.metrics_scale * f * np.exp(
+        -1 / (2 * (settings.metrics_beta ** 2)) * (x - settings.metrics_percentile) ** 2)
     return y
 
 
@@ -782,7 +795,8 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(dataloader.iter_test(batch_size=settings.batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
+                dataloader.iter_test(batch_size=settings.batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
@@ -850,7 +864,8 @@ try:
         optimizer = torch.optim.SGD(params=model.parameters(), lr=settings.learning_rate, momentum=0.9,
                                     dampening=0, weight_decay=0, nesterov=True)
     else:
-        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08, weight_decay=settings.weight_decay, momentum=0, centered=False)
+        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08,
+                                        weight_decay=settings.weight_decay, momentum=0, centered=False)
 
     for epoch in range(1, n_epochs + 1):
         epoch_start_time = time.time()
@@ -862,7 +877,8 @@ try:
 
         print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
         ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in
-                         ('train_loss', 'loss', 'hitrate@5', 'hitrate_by_pop@5', 'weighted_luciano_stat@5', 'luciano_stat_by_pop@5')])
+                         ('train_loss', 'loss', 'hitrate@5', 'hitrate_by_pop@5', 'weighted_luciano_stat@5',
+                          'luciano_stat_by_pop@5')])
         ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
         ls = len(ss)
         print('-' * ls)
@@ -943,15 +959,10 @@ print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
 
 """# Save result"""
 
-rundate = datetime.today().strftime('%Y%m%d_%H%M')
 lossname = criterion.__class__.__name__
 
-folder_name = os.path.join(result_dir, f'run_{settings.dataset_name}_{rundate}_{lossname}')
-
-os.mkdir(folder_name)
-
 # result info
-with open(os.path.join(folder_name, 'info.txt'), 'w') as fp:
+with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
     fp.write(f'K = {settings.gamma_k}\n')
     fp.write(f'Loss = {lossname}\n')
     fp.write(f'Epochs train = {len(stat_metric)}\n')
@@ -968,11 +979,11 @@ with open(os.path.join(folder_name, 'info.txt'), 'w') as fp:
 
 
 # all results
-with open(os.path.join(folder_name, 'result.json'), 'w') as fp:
+with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
     json.dump(stat_metric, fp)
 
 # test results
-with open(os.path.join(folder_name, 'result_test.json'), 'w') as fp:
+with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
     json.dump(result_test, fp, indent=4, sort_keys=True)
 
 # chart 1
@@ -993,7 +1004,7 @@ ax2.set_title('Validation')
 ax3.plot(lastHitRate)
 ax3.set_title('HitRate@5')
 
-plt.savefig(os.path.join(folder_name, 'loss.png'));
+plt.savefig(os.path.join(run_dir, 'loss.png'));
 
 # chart 2
 fig, axes = plt.subplots(4, 3, figsize=(20, 20))
@@ -1020,6 +1031,6 @@ for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
         ax.plot(hitRate)
         ax.set_title(f'{name} hitrate_by_pop@{k}')
 
-plt.savefig(os.path.join(folder_name, 'hr.png'));
+plt.savefig(os.path.join(run_dir, 'hr.png'));
 
-print('DONE', folder_name)
+print('DONE', run_dir)
