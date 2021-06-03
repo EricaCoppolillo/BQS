@@ -24,7 +24,7 @@ PINTEREST = 'pinterest'
 # ---------------------------------------------------
 
 # SETTINGS ------------------------------------------
-dataset_name = CITEULIKE
+dataset_name = MOVIELENS_1M
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # ---------------------------------------------------
 
@@ -685,11 +685,16 @@ class MultiVAE(nn.Module):
 
 class EnsembleMultiVAE(nn.Module):
 
-    def __init__(self, n_items):
+    def __init__(self, n_items, popularity, thresholds=None, ):
         super(EnsembleMultiVAE, self).__init__()
 
         self.n_items = n_items
-        self.test_print = True
+        self.test_print = False
+        self.popularity = popularity
+        self.thresholds = thresholds
+
+        self.filter_a = torch.tensor(np.array(self.popularity) > self.thresholds[0]).to(device).float()  # baseline
+        self.filter_b = torch.tensor(np.array(self.popularity) <= self.thresholds[0]).to(device).float()  # low
 
     def normalize(self, tensor):
         min_v = torch.min(tensor)
@@ -700,25 +705,66 @@ class EnsembleMultiVAE(nn.Module):
             normalised = torch.zeros(tensor.size())
         return normalised
 
-    def forward(self, x, popularity, y_a, y_b, predict=False):
-
-        if self.test_print:
-            print('ENSEMBLE TEST PRINT (train)---------------------------------------')
-            print('Shape x, x[0]:', len(x), len(x[0]))
-            print('Shape y_a, y_a[0]:', len(y_a), len(y_a[0]))
-            print('Shape y_b, y_b[0]:', len(y_b), len(y_b[0]))
-            print('Shape popularity:', len(popularity))
-            print('x[0][:100]:', x[0][:100])
-            print('y_a[0][:100]:', y_a[0][:100])
-            print('y_b[0][:100]:', y_b[0][:100])
-            print('popularity:', popularity[:100])
-            print('------------------------------------------------------------------')
-            self.test_print = False
-
+    def forward(self, x, y_a, y_b, predict=False):
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
 
-        y_e = z_a + z_b * 0.4
+        if self.test_print:
+            print('ENSEMBLE TEST PRINT (train) ---------------------------------------')
+            print('Shape x, x[0]:', len(x), len(x[0]))
+            print('Shape y_a, y_a[0]:', len(y_a), len(y_a[0]))
+            print('Shape y_b, y_b[0]:', len(y_b), len(y_b[0]))
+            print('Shape popularity:', len(self.popularity))
+            print('Type popularity:', type(self.popularity))
+            print('x[0][:100]:', x[0][:100])
+            print('y_a[0][:100]:', y_a[0][:100])
+            print('y_b[0][:100]:', y_b[0][:100])
+            print('z_a[0][:100]:', z_a[0][:100])
+            print('z_b[0][:100]:', z_b[0][:100])
+            print('popularity:', self.popularity[:100])
+            print('filter a:', self.filter_a[:100])
+            print('filter b:', self.filter_b[:100])
+            print('thresholds:', self.thresholds)
+            print('-------------------------------------------------------------------')
+            self.test_print = False
+
+        baseline = False
+        gamma = 1
+
+        if baseline:
+            y_e = z_a
+        else:
+            y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
+            # y_e = z_a + z_b * gamma
+
+        '''
+        CITE U LIKE ----------------------------------------------------------------------------------------------------
+        
+        BASELINE
+        luciano_stat_by_pop@1  0.07,0.22,0.67
+        luciano_stat_by_pop@10 0.48,0.75,0.95
+        luciano_stat_by_pop@5  0.29,0.57,0.90
+        
+        ENSEMBLE (old)
+        luciano_stat_by_pop@1  0.17,0.20,0.66
+        luciano_stat_by_pop@10 0.72,0.63,0.91
+        luciano_stat_by_pop@5  0.51,0.49,0.87
+        
+        ENSEMBLE (filter gamma=1.0)
+        luciano_stat_by_pop@1  0.16,0.19,0.65
+        luciano_stat_by_pop@10 0.76,0.53,0.88
+        luciano_stat_by_pop@5  0.52,0.43,0.84
+        
+        ENSEMBLE (filter gamma=0.9)
+        luciano_stat_by_pop@1  0.15,0.20,0.66
+        luciano_stat_by_pop@10 0.71,0.57,0.89
+        luciano_stat_by_pop@5  0.47,0.46,0.85
+        
+        ENSEMBLE (filter gamma=0.5)
+        luciano_stat_by_pop@1  0.09,0.21,0.66
+        luciano_stat_by_pop@10 0.60,0.63,0.91
+        luciano_stat_by_pop@5  0.38,0.50,0.87
+        '''
 
         return y_e
 
@@ -824,11 +870,12 @@ class rvae_focal_loss(rvae_loss):
         return neg_ll
 
 
-"""# Train and test"""
-
+# Dataloader
 trainloader = DataLoader(data_dir, use_popularity=True)
-# dataloader = DataLoaderDummy(None)
 n_items = trainloader.n_items
+thresholds = trainloader.thresholds
+popularity = trainloader.item_popularity
+frequencies = trainloader.frequencies
 
 # SETTINGS
 settings = types.SimpleNamespace()
@@ -849,18 +896,17 @@ settings.metrics_beta = .03
 settings.metrics_gamma = 5
 settings.metrics_scale = 1 / 15
 settings.metrics_percentile = .45
-popularity = trainloader.item_popularity
-thresholds = trainloader.thresholds
-frequencies = trainloader.frequencies
 max_y_aux_popularity = compute_max_y_aux_popularity()
 
 
 def naive_sparse2tensor(data):
     return torch.FloatTensor(data.toarray() if hasattr(data, 'toarray') else data)
 
+
 top_k = (1, 5, 10)
 
-def evaluate(dataloader, normalized_popularity, tag='validation'):
+
+def evaluate(dataloader, tag='validation'):
     # Turn on evaluation mode
     model.eval()
     accumulator = MetricAccumulator()
@@ -884,7 +930,7 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 
             x_input = x_tensor * (1 - mask_te)
 
-            y = model(x_input, popularity, y_a, y_b, True)
+            y = model(x_input, y_a, y_b, True)
 
             loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
 
@@ -919,7 +965,7 @@ settings.scale = 1000
 settings.use_popularity = True
 settings.p_dims = [200, 600, n_items]
 
-model = EnsembleMultiVAE(n_items)
+model = EnsembleMultiVAE(n_items, popularity, thresholds)
 model = model.to(device)
 
 criterion = rvae_rank_pair_loss(popularity=popularity,
@@ -932,7 +978,7 @@ stat_metric = []
 
 # Test stats
 model.eval()
-result_test = evaluate(trainloader, popularity, 'test')
+result_test = evaluate(trainloader, 'test')
 
 print('*** TEST RESULTS ***')
 print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
