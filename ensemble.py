@@ -25,7 +25,7 @@ PINTEREST = 'pinterest'
 
 # SETTINGS ------------------------------------------
 dataset_name = MOVIELENS_1M
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 # ---------------------------------------------------
 
 SEED = 8734
@@ -626,7 +626,7 @@ class MultiVAE(nn.Module):
         # h = F.normalize(input_data)
         # h = self.drop(h)
         h = input_data
-
+        mu, logvar = None, None
         for i, layer in enumerate(self.q_layers):
             h = layer(h)
             if i != len(self.q_layers) - 1:
@@ -729,13 +729,13 @@ class EnsembleMultiVAE(nn.Module):
             self.test_print = False
 
         baseline = False
-        gamma = 1
+        gamma = .4
 
         if baseline:
             y_e = z_a
         else:
-            y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
-            # y_e = z_a + z_b * gamma
+            # y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
+            y_e = z_a + z_b * gamma
 
         '''
         CITE U LIKE ----------------------------------------------------------------------------------------------------

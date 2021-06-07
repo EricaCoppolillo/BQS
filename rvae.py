@@ -24,9 +24,9 @@ PINTEREST = 'pinterest'
 
 
 # SETTINGS ------------------------------------------
-BASELINE = True  # Baseline/LowPop model
-dataset_name = CITEULIKE
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+BASELINE = False  # Baseline/LowPop model
+dataset_name = MOVIELENS_1M
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 # ---------------------------------------------------
 
 SEED = 8734
@@ -60,9 +60,9 @@ if not os.path.exists(result_dir):
 
 run_time = datetime.today().strftime('%Y%m%d_%H%M')
 if BASELINE:
-    type_str='baseline'
+    type_str = 'baseline'
 else:
-    type_str='popularity_low'
+    type_str = 'popularity_low'
 run_dir = os.path.join(result_dir, f'{type_str}_{run_time}')
 
 os.mkdir(run_dir)
@@ -514,7 +514,7 @@ class MultiVAE(nn.Module):
         # h = F.normalize(input_data)
         # h = self.drop(h)
         h = input_data
-
+        mu, logvar = None, None
         for i, layer in enumerate(self.q_layers):
             h = layer(h)
             if i != len(self.q_layers) - 1:
