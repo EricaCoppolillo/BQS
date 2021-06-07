@@ -5,9 +5,12 @@ import types
 from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns; sns.set()
+import torch
+import numpy as np
+import json
 
 from evaluation import MetricAccumulator
-from util import *
+from util import compute_max_y_aux_popularity, naive_sparse2tensor
 from data_loaders import EnsembleDataLoader
 from models import EnsembleMultiVAE
 from loss_func import ensemble_rvae_rank_pair_loss
@@ -119,7 +122,7 @@ settings.metrics_beta = .03
 settings.metrics_gamma = 5
 settings.metrics_scale = 1 / 15
 settings.metrics_percentile = .45
-max_y_aux_popularity = compute_max_y_aux_popularity()
+max_y_aux_popularity = compute_max_y_aux_popularity(settings)
 
 
 

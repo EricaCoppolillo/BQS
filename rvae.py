@@ -5,8 +5,11 @@ import types
 from datetime import datetime
 import matplotlib.pyplot as plt
 import time
+import torch
+import numpy as np
+import json
 from evaluation import MetricAccumulator
-from util import *
+from util import compute_max_y_aux_popularity, naive_sparse2tensor
 from models import MultiVAE
 from loss_func import rvae_rank_pair_loss
 from data_loaders import DataLoader
@@ -106,7 +109,7 @@ popularity = trainloader.item_popularity
 thresholds = trainloader.thresholds
 frequencies = trainloader.frequencies
 
-max_y_aux_popularity = compute_max_y_aux_popularity()
+max_y_aux_popularity = compute_max_y_aux_popularity(settings)
 
 
 
