@@ -10,7 +10,7 @@ from evaluation import MetricAccumulator
 from util import *
 from data_loaders import EnsembleDataLoader
 from models import EnsembleMultiVAE
-from loss_func import ensemble_rvae_loss, ensemble_rvae_focal_loss, ensemble_rvae_rank_pair_loss
+from loss_func import ensemble_rvae_rank_pair_loss
 
 # DATASETS ----------------------------------------
 CITEULIKE = 'citeulike-a'
