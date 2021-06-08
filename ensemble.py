@@ -180,7 +180,8 @@ with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
 
 # test results
 with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
-    json.dump(result_test, fp, indent=4, sort_keys=True)
+    json.dump({renaming_luciano_stat[k]: v for k, v in result_test.items() if k in renaming_luciano_stat}, fp,
+              indent=4, sort_keys=True)
 
 # chart 1
 lossTrain = [x['train_loss'] for x in stat_metric]

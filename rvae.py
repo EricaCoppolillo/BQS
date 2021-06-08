@@ -347,12 +347,16 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
 
 
 # all results
+def renaming_results(result_dict, rename_dict):
+    return {rename_dict[k]: v for k, v in result_dict.items() if k in rename_dict}
+
 with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
-    json.dump(stat_metric, fp)
+    json.dump(list(map(lambda x: renaming_results(x, renaming_luciano_stat), stat_metric)), fp)
 
 # test results
 with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
-    json.dump(result_test, fp, indent=4, sort_keys=True)
+    json.dump(renaming_results(result_test, renaming_luciano_stat), fp,
+              indent=4, sort_keys=True)
 
 # chart 1
 lossTrain = [x['train_loss'] for x in stat_metric]
