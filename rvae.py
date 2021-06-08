@@ -1,7 +1,5 @@
 import collections
 import os
-import random
-import types
 from datetime import datetime
 import matplotlib.pyplot as plt
 import time
@@ -9,42 +7,32 @@ import torch
 import numpy as np
 import json
 from evaluation import MetricAccumulator
-from util import compute_max_y_aux_popularity, naive_sparse2tensor
+from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from models import MultiVAE
 from loss_func import rvae_rank_pair_loss
 from data_loaders import DataLoader
-
-# DATASETS ----------------------------------------
-CITEULIKE = 'citeulike-a'
-EPINIONS = 'epinions'
-MOVIELENS_1M = 'ml-1m'
-MOVIELENS_20M = 'ml-20m'
-NETFLIX = 'netflix'
-NETFLIX_SAMPLE = 'netflix_sample'
-PINTEREST = 'pinterest'
-# ---------------------------------------------------
-
+from constants import datasets
+from config import Config
 
 # SETTINGS ------------------------------------------
 BASELINE = False  # Baseline/LowPop model
-dataset_name = MOVIELENS_1M
+dataset_name = datasets.MOVIELENS_1M
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+config = Config("./rvae_config.json")
+config.metrics_scale = eval(config.metrics_scale)
+config.use_popularity = eval(config.use_popularity)
+config.p_dims = eval(config.p_dims)
 # ---------------------------------------------------
 
+# set seed tor experiment reproducibility
 SEED = 8734
-
-np.random.seed(SEED)
-random.seed(SEED)
-torch.manual_seed(SEED)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
+set_seed(SEED)
 
 USE_CUDA = True
 CUDA = USE_CUDA and torch.cuda.is_available()
-
 device = torch.device("cuda" if CUDA else "cpu")
 
-print(torch.__version__)
+print(f"Current PyTorch version: {torch.__version__}")
 
 if CUDA:
     print('run on cuda %s' % os.environ['CUDA_VISIBLE_DEVICES'])
@@ -82,41 +70,19 @@ else:
     trainloader = DataLoader(dataset_file, use_popularity=True)
 
 n_items = trainloader.n_items
-
-# SETTINGS
-settings = types.SimpleNamespace()
-settings.dataset_name = os.path.split(data_dir)[-1]
-# settings.p_dims = [200, 600, n_items]
-
-settings.batch_size = 1024
-settings.weight_decay = 0.0
-settings.learning_rate = 1e-3
-# the total number of gradient updates for annealing
-settings.total_anneal_steps = 200000
-# largest annealing parameter
-settings.anneal_cap = 0.2
-settings.sample_mask = 100
-
-settings.gamma_k = 1000
-
-settings.metrics_alpha = 100
-settings.metrics_beta = .03
-settings.metrics_gamma = 5
-settings.metrics_scale = 1 / 15
-settings.metrics_percentile = .45
-
+config.p_dims.append(n_items)
 popularity = trainloader.item_popularity
 thresholds = trainloader.thresholds
 frequencies = trainloader.frequencies
 
-max_y_aux_popularity = compute_max_y_aux_popularity(settings)
+max_y_aux_popularity = compute_max_y_aux_popularity(config)
 
 
 
 def train(dataloader, epoch, optimizer):
     global update_count
 
-    log_interval = int(trainloader.n_users * .7 / settings.batch_size // 4)
+    log_interval = int(trainloader.n_users * .7 / config.batch_size // 4)
     if log_interval == 0:
         log_interval = 1
 
@@ -130,17 +96,17 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
-    for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=settings.batch_size)):
+    for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=config.batch_size)):
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
         mask = naive_sparse2tensor(mask).to(device)
 
         update_count += 1
-        if settings.total_anneal_steps > 0:
-            anneal = min(settings.anneal_cap, 1. * update_count / settings.total_anneal_steps)
+        if config.total_anneal_steps > 0:
+            anneal = min(config.anneal_cap, 1. * update_count / config.total_anneal_steps)
         else:
-            anneal = settings.anneal_cap
+            anneal = config.anneal_cap
 
         # TRAIN on batch
         optimizer.zero_grad()
@@ -159,7 +125,7 @@ def train(dataloader, epoch, optimizer):
         if batch_idx % log_interval == 0 and batch_idx > 0:
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:4d}/{:4d} batches | ms/batch {:4.2f} | loss {:4.4f}'.format(
-                epoch, batch_idx, len(range(0, dataloader.size['train'], settings.batch_size)),
+                epoch, batch_idx, len(range(0, dataloader.size['train'], config.batch_size)),
                 elapsed * 1000 / log_interval,
                 train_loss / log_interval))
 
@@ -188,7 +154,7 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 
     with torch.no_grad():
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
-                dataloader.iter_test(batch_size=settings.batch_size, tag=tag)):
+                dataloader.iter_test(batch_size=config.batch_size, tag=tag)):
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
@@ -227,17 +193,14 @@ torch.set_printoptions(profile="full")
 
 n_epochs = 50
 update_count = 0
-settings.optim = 'adam'
-settings.scale = 1000
-settings.use_popularity = True
-settings.p_dims = [200, 600, n_items]
 
-print(settings.p_dims)
-model = MultiVAE(settings.p_dims)
+
+print(config.p_dims)
+model = MultiVAE(config.p_dims)
 model = model.to(device)
 
-criterion = rvae_rank_pair_loss(popularity=popularity if settings.use_popularity else None,
-                                scale=settings.scale,
+criterion = rvae_rank_pair_loss(popularity=popularity if config.use_popularity else None,
+                                scale=config.scale,
                                 thresholds=thresholds,
                                 frequencies=frequencies)
 # criterion = rvae_focal_loss(popularity=popularity if settings.use_popularity else None, scale=settings.scale)
@@ -248,16 +211,16 @@ stat_metric = []
 
 print('At any point you can hit Ctrl + C to break out of training early.')
 try:
-    if settings.optim == 'adam':
+    if config.optim == 'adam':
         optimizer = torch.optim.Adam(model.parameters(),
-                                     lr=settings.learning_rate,
-                                     weight_decay=settings.weight_decay)
-    elif settings.optim == 'sgd':
-        optimizer = torch.optim.SGD(params=model.parameters(), lr=settings.learning_rate, momentum=0.9,
+                                     lr=config.learning_rate,
+                                     weight_decay=config.weight_decay)
+    elif config.optim == 'sgd':
+        optimizer = torch.optim.SGD(params=model.parameters(), lr=config.learning_rate, momentum=0.9,
                                     dampening=0, weight_decay=0, nesterov=True)
     else:
-        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08,
-                                        weight_decay=settings.weight_decay, momentum=0, centered=False)
+        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=config.learning_rate, alpha=0.99, eps=1e-08,
+                                        weight_decay=config.weight_decay, momentum=0, centered=False)
 
     for epoch in range(1, n_epochs + 1):
         epoch_start_time = time.time()
@@ -346,7 +309,7 @@ plt.show();
 model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
 
-print(f'K = {settings.gamma_k}')
+print(f'K = {config.gamma_k}')
 print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
 
 """# Save result"""
@@ -355,15 +318,14 @@ lossname = criterion.__class__.__name__
 
 # result info
 with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
-    fp.write(f'K = {settings.gamma_k}\n')
+    fp.write(f'K = {config.gamma_k}\n')
     fp.write(f'Loss = {lossname}\n')
     fp.write(f'Epochs train = {len(stat_metric)}\n')
 
     fp.write('\n')
 
-    for k in dir(settings):
-        if not k.startswith('__'):
-            fp.write(f'{k} = {getattr(settings, k)}\n')
+    for k in config.__dict__:
+        fp.write(f'{k} = {config.__dict__[k]}\n')
 
 #    fp.write('\n' * 4)
 #    model_print, _ = torchsummary.summary_string(model, (dataloader.n_items,), device='gpu' if CUDA else 'cpu')

@@ -1,0 +1,18 @@
+{
+  "batch_size":1024,
+  "weight_decay":0.0,
+  "learning_rate":1e-3,
+  "total_anneal_steps":200000,
+  "anneal_cap":0.2,
+  "sample_mask":100,
+  "gamma_k":1000,
+  "metrics_alpha":100,
+  "metrics_beta":0.03,
+  "metrics_gamma":5,
+  "metrics_scale":"1/15",
+  "metrics_percentile":0.45,
+  "optim": "adam",
+  "scale": 100,
+  "use_popularity": "True",
+  "p_dims": "[200, 600]"
+}
