@@ -14,18 +14,19 @@ from data_loaders import DataLoader
 from config import Config
 
 # SETTINGS ------------------------------------------
-BASELINE = False  # Baseline/LowPop model
 datasets = Config("./datasets_info.json")
 dataset_name = datasets.MOVIELENS_1M
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 config = Config("./rvae_config.json")
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
+config.baseline_flag = eval(config.baseline_flag)
+BASELINE = config.baseline_flag  # Baseline/LowPop model
 # ---------------------------------------------------
 
 # set seed tor experiment reproducibility
-SEED = 8734
+SEED = config.seed
 set_seed(SEED)
 
 USE_CUDA = True
@@ -78,7 +79,6 @@ frequencies = trainloader.frequencies
 max_y_aux_popularity = compute_max_y_aux_popularity(config)
 
 
-
 def train(dataloader, epoch, optimizer):
     global update_count
 
@@ -113,7 +113,8 @@ def train(dataloader, epoch, optimizer):
         y, mu, logvar = model(x)
 
         # loss = criterion(recon_batch, x, pos_items, neg_items, mask, mask, mu, logvar, anneal)
-        loss = criterion(x, y, mu, logvar, anneal, pos_items=pos_items, neg_items=neg_items, mask=mask)
+        loss = criterion(x, y, mu, logvar, anneal, pos_items=pos_items, neg_items=neg_items, mask=mask,
+                         BASELINE=BASELINE)
         loss.backward()
         optimizer.step()
 
@@ -168,7 +169,7 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
             y, mu, logvar = model(x_input, True)
 
             #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
-            loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask)
+            loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask, BASELINE=BASELINE)
 
             result['loss'] += loss.item()
 
@@ -191,9 +192,8 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 
 torch.set_printoptions(profile="full")
 
-n_epochs = 50
+n_epochs = config.n_epochs
 update_count = 0
-
 
 print(config.p_dims)
 model = MultiVAE(config.p_dims)
@@ -229,10 +229,13 @@ try:
 
         result['train_loss'] = train_loss
         stat_metric.append(result)
-
-        print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
+        renaming_luciano_stat = {"weighted_luciano_stat@5": "weighted_hit_rate@5",
+                                 "luciano_stat_by_pop@5": "hitrate_by_pop@5",
+                                 "train_loss": "train_loss", "loss": "loss"}
+        print_metric = lambda k, v: f'{renaming_luciano_stat[k]}: {v:.4f}' if not isinstance(v, str) \
+            else f'{renaming_luciano_stat[k]}: {v}'
         ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in
-                         ('train_loss', 'loss', 'hitrate@5', 'hitrate_by_pop@5', 'weighted_luciano_stat@5',
+                         ('train_loss', 'loss', 'weighted_luciano_stat@5',
                           'luciano_stat_by_pop@5')])
         ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
         ls = len(ss)
@@ -251,19 +254,28 @@ except KeyboardInterrupt:
 
 # output.show()
 
-model = torch.load_state_dict(torch.load(file_model))
+model = MultiVAE(config.p_dims)
+model = model.to(device)
+model.load_state_dict(torch.load(file_model))
 model.eval()
 
 """# Training stats"""
 
-# print(f'K = {settings.gamma_k}')
-print('\n'.join([f'{k:<23}{v}' for k, v in sorted(stat_metric[-1].items())]))
+renaming_luciano_stat = {"loss": "loss", "train_loss": "train_loss"}
+d1 = {f"luciano_recalled_by_pop@{k}": f"recall_by_pop@{k}" for k in [1, 5, 10]}
+d2 = {f"luciano_stat_by_pop@{k}": f"hit_rate_by_pop@{k}" for k in [1, 5, 10]}
+d3 = {f"luciano_stat@{k}": f"hit_rate@{k}" for k in [1, 5, 10]}
+d4 = {f"luciano_weighted_stat@{k}": f"weighted_hit_Rate@{k}" for k in [1, 5, 10]}
+renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4}
+
+print("Training Statistics: \n")
+print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(stat_metric[-1].items())
+                 if k in renaming_luciano_stat]))
 
 # LOSS
 lossTrain = [x['train_loss'] for x in stat_metric]
 lossTest = [x['loss'] for x in stat_metric]
-
-lastHitRate = [x['hitrate@5'] for x in stat_metric]
+lastHitRate = [x['luciano_stat@5'] for x in stat_metric]
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
 ax1.plot(lossTrain, color='b', )
@@ -283,7 +295,7 @@ axes = axes.ravel()
 i = 0
 
 for k in top_k:
-    hitRate = [x[f'hitrate@{k}'] for x in stat_metric]
+    hitRate = [x[f'luciano_stat@{k}'] for x in stat_metric]
 
     ax = axes[i]
     i += 1
@@ -293,7 +305,7 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'luciano_stat_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
@@ -309,7 +321,9 @@ model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
 
 print(f'K = {config.gamma_k}')
-print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
+print("Test Statistics: \n")
+print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(result_test.items())
+                 if k in renaming_luciano_stat]))
 
 """# Save result"""
 
@@ -319,8 +333,9 @@ lossname = criterion.__class__.__name__
 with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
     fp.write(f'K = {config.gamma_k}\n')
     fp.write(f'Loss = {lossname}\n')
-    fp.write(f'Epochs train = {len(stat_metric)}\n')
-
+    # fp.write(f'Epochs train = {len(stat_metric)}\n')
+    fp.write(f"Dataset = {dataset_name}\n")
+    fp.write(f"Seed = {SEED}\n")
     fp.write('\n')
 
     for k in config.__dict__:
@@ -343,7 +358,7 @@ with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
 lossTrain = [x['train_loss'] for x in stat_metric]
 lossTest = [x['loss'] for x in stat_metric]
 
-lastHitRate = [x['hitrate@5'] for x in stat_metric]
+lastHitRate = [x['luciano_stat@5'] for x in stat_metric]
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
 ax1.plot(lossTrain, color='b', )
@@ -358,6 +373,7 @@ ax3.plot(lastHitRate)
 ax3.set_title('HitRate@5')
 
 plt.savefig(os.path.join(run_dir, 'loss.png'));
+plt.savefig(os.path.join(run_dir, 'loss.pdf'));
 
 # chart 2
 fig, axes = plt.subplots(4, 3, figsize=(20, 20))
@@ -366,7 +382,7 @@ axes = axes.ravel()
 i = 0
 
 for k in top_k:
-    hitRate = [x[f'hitrate@{k}'] for x in stat_metric]
+    hitRate = [x[f'luciano_stat@{k}'] for x in stat_metric]
 
     ax = axes[i]
     i += 1
@@ -376,7 +392,7 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'luciano_stat_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
@@ -385,5 +401,6 @@ for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
         ax.set_title(f'{name} hitrate_by_pop@{k}')
 
 plt.savefig(os.path.join(run_dir, 'hr.png'));
+plt.savefig(os.path.join(run_dir, 'hr.pdf'));
 
 print('DONE', run_dir)

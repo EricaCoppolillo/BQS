@@ -89,7 +89,7 @@ class rvae_rank_pair_loss(rvae_loss):
         pop_pos = self.popularity[pos_items.long()]
         pop_neg = self.popularity[neg_items.long()]
 
-        filter_pos = (pop_pos <= self.thresholds[0]).float()  # low
+        filter_pos = (pop_pos <= self.thresholds[0]).float().cuda()  # low
         filter_neg = (pop_neg > self.thresholds[0]).float()  # low
 
         # freq_pos = self.frequencies[pos_items.long()].float()

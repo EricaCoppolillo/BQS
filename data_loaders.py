@@ -358,7 +358,8 @@ class DataLoader:
 
 
 class EnsembleDataLoader:
-    def __init__(self, data_dir, p_dims, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000):
+    def __init__(self, data_dir, p_dims, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000
+                 , device="cpu"):
         dataset_file = os.path.join(data_dir, 'data_rvae')
         dataset = load_dataset(dataset_file)
 
@@ -423,6 +424,8 @@ class EnsembleDataLoader:
         self.baseline_model.load_state_dict(torch.load(baseline_file_model))
         self.popularity_model = MultiVAE(p_dims)
         self.popularity_model.load_state_dict(torch.load(popularity_file_model))
+        self.baseline_model.to(device)
+        self.popularity_model.to(device)
         self.baseline_model.eval()
         self.popularity_model.eval()
         print('ensemble models loaded!')

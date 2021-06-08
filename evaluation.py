@@ -85,15 +85,15 @@ class MetricAccumulator:
 
                 computed_acc.luciano_weighted_stat = np.average(acc.luciano_guessed_items[nz] / acc.luciano_occurencies[nz])
 
-                print('K:', k)
-                print(acc.luciano_guessed_items[:10])
-                print(acc.luciano_occurencies[:10])
+                # print('K:', k)
+                # print(acc.luciano_guessed_items[:10])
+                # print(acc.luciano_occurencies[:10])
 
-                print(acc.luciano_guessed_items[nz].shape)
-                print(acc.luciano_occurencies[nz].shape)
+                # print(acc.luciano_guessed_items[nz].shape)
+                # print(acc.luciano_occurencies[nz].shape)
 
-                print('computed_acc.luciano_weighted_stat:', computed_acc.luciano_weighted_stat)
-                print('old:',(acc.luciano_guessed_items[nz].sum() / acc.luciano_occurencies[nz].sum()))
+                # print('computed_acc.luciano_weighted_stat:', computed_acc.luciano_weighted_stat)
+                # print('old:',(acc.luciano_guessed_items[nz].sum() / acc.luciano_occurencies[nz].sum()))
 
                 result[k] = computed_acc
 

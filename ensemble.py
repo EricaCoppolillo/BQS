@@ -17,14 +17,14 @@ from config import Config
 # SETTINGS ------------------------------------------
 datasets = Config("./datasets_info.json")
 dataset_name = datasets.MOVIELENS_1M
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config = Config("./rvae_config.json")
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
 # ---------------------------------------------------
 
-SEED = 8734
+SEED = config.seed
 set_seed(SEED)
 
 USE_CUDA = True
@@ -70,7 +70,7 @@ In test the data is reported with 3 masks of items with less, middle and top pop
 """
 
 # Dataloader
-trainloader = EnsembleDataLoader(data_dir, use_popularity=True)
+trainloader = EnsembleDataLoader(data_dir, config.p_dims, use_popularity=True, device=device)
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
 thresholds = trainloader.thresholds
@@ -95,9 +95,9 @@ def evaluate(dataloader, tag='validation'):
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
                 dataloader.iter_test_ensemble(batch_size=config.batch_size, tag=tag, device=device)):
             x_tensor = naive_sparse2tensor(x).to(device)
-            pos = naive_sparse2tensor(pos).to(device)
-            neg = naive_sparse2tensor(neg).to(device)
-            mask = naive_sparse2tensor(mask).to(device)
+            # pos = naive_sparse2tensor(pos).to(device)
+            # neg = naive_sparse2tensor(neg).to(device)
+            # mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
 
             batch_num += 1
@@ -107,7 +107,7 @@ def evaluate(dataloader, tag='validation'):
 
             y = model(x_input, y_a, y_b, True)
 
-            loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
+            # loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
 
             result['loss'] += 0  # loss.item()
 
@@ -149,7 +149,15 @@ model.eval()
 result_test = evaluate(trainloader, 'test')
 
 print('*** TEST RESULTS ***')
-print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
+renaming_luciano_stat = {"loss": "loss", "train_loss": "train_loss"}
+d1 = {f"luciano_recalled_by_pop@{k}": f"recall_by_pop@{k}" for k in [1, 5, 10]}
+d2 = {f"luciano_stat_by_pop@{k}": f"hit_rate_by_pop@{k}" for k in [1, 5, 10]}
+d3 = {f"luciano_stat@{k}": f"hit_rate@{k}" for k in [1, 5, 10]}
+d4 = {f"luciano_weighted_stat@{k}": f"weighted_hit_Rate@{k}" for k in [1, 5, 10]}
+renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4}
+
+print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(result_test.items())
+                 if k in renaming_luciano_stat]))
 
 # Save result
 
@@ -160,7 +168,7 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
     fp.write(f'K = {config.gamma_k}\n')
     fp.write(f'Loss = {lossname}\n')
     fp.write(f'Epochs train = {len(stat_metric)}\n')
-
+    fp.write(f"Dataset = {dataset_name}\n")
     fp.write('\n')
 
     for k in config.__dict__:
@@ -193,6 +201,7 @@ ax3.plot(lastHitRate)
 ax3.set_title('HitRate@5')
 
 plt.savefig(os.path.join(run_dir, 'loss.png'));
+plt.savefig(os.path.join(run_dir, 'loss.pdf'));
 
 # chart 2
 fig, axes = plt.subplots(4, 3, figsize=(20, 20))
@@ -220,5 +229,6 @@ for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
         ax.set_title(f'{name} hitrate_by_pop@{k}')
 
 plt.savefig(os.path.join(run_dir, 'hr.png'));
+plt.savefig(os.path.join(run_dir, 'hr.pdf'));
 
 print('DONE', run_dir)

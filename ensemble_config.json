@@ -14,5 +14,6 @@
   "optim": "adam",
   "scale": 1000,
   "use_popularity": "True",
-  "p_dims": "[200, 600]"
+  "p_dims": "[200, 600]",
+  "seed": 8734
 }
