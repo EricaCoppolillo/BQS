@@ -11,11 +11,11 @@ from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from models import MultiVAE
 from loss_func import rvae_rank_pair_loss
 from data_loaders import DataLoader
-from constants import datasets
 from config import Config
 
 # SETTINGS ------------------------------------------
 BASELINE = False  # Baseline/LowPop model
+datasets = Config("./datasets_info.json")
 dataset_name = datasets.MOVIELENS_1M
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config = Config("./rvae_config.json")

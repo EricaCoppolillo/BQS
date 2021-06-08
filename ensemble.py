@@ -12,10 +12,10 @@ from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from data_loaders import EnsembleDataLoader
 from models import EnsembleMultiVAE
 from loss_func import ensemble_rvae_rank_pair_loss
-from constants import datasets
 from config import Config
 
 # SETTINGS ------------------------------------------
+datasets = Config("./datasets_info.json")
 dataset_name = datasets.MOVIELENS_1M
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config = Config("./rvae_config.json")
