@@ -242,8 +242,7 @@ try:
 
         # Save the model if the n100 is the best we've seen so far.
         if best_loss > result['loss']:
-            with open(file_model, 'wb') as f:
-                torch.save(model, f)
+            torch.save(model.state_dict(), file_model)
             best_loss = result['loss']
 
 except KeyboardInterrupt:
@@ -252,8 +251,8 @@ except KeyboardInterrupt:
 
 # output.show()
 
-with open(file_model, 'rb') as f:
-    model = torch.load(f)
+model = torch.load_state_dict(torch.load(file_model))
+model.eval()
 
 """# Training stats"""
 

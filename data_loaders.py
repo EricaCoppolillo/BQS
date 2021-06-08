@@ -1,8 +1,8 @@
 import os
 import gc
-import random
 
 from util import *
+from models import *
 
 
 class DataLoader:
@@ -358,25 +358,7 @@ class DataLoader:
 
 
 class EnsembleDataLoader:
-    def __init__(self, data_dir, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000):
-        # loading models
-        print('loading ensemble models...')
-        baseline_dir = os.path.join(data_dir, 'baseline')
-        popularity_dir = os.path.join(data_dir, 'popularity_low')
-
-        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
-        popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
-
-        with open(baseline_file_model, 'rb') as f:
-            self.baseline_model = torch.load(f)
-
-        with open(popularity_file_model, 'rb') as f:
-            self.popularity_model = torch.load(f)
-
-        self.baseline_model.eval()
-        self.popularity_model.eval()
-        print('ensemble models loaded!')
-
+    def __init__(self, data_dir, p_dims, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000):
         dataset_file = os.path.join(data_dir, 'data_rvae')
         dataset = load_dataset(dataset_file)
 
@@ -427,6 +409,23 @@ class EnsembleDataLoader:
         print('sorted(self.sorted_item_popularity)[:100]:', sorted(self.sorted_item_popularity[:10]))
         print('sorted(self.sorted_item_popularity)[-100:]:', sorted(self.sorted_item_popularity[-10:]))
         print('sorted(frequencies):', sorted(self.frequencies)[:10])
+
+        # loading models
+        print('loading ensemble models...')
+        baseline_dir = os.path.join(data_dir, 'baseline')
+        popularity_dir = os.path.join(data_dir, 'popularity_low')
+
+        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
+        popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
+
+        p_dims.append(self.n_items)
+        self.baseline_model = MultiVAE(p_dims)
+        self.baseline_model.load_state_dict(torch.load(baseline_file_model))
+        self.popularity_model = MultiVAE(p_dims)
+        self.popularity_model.load_state_dict(torch.load(popularity_file_model))
+        self.baseline_model.eval()
+        self.popularity_model.eval()
+        print('ensemble models loaded!')
 
         print('phase 1: Loading data...')
         self._initialize()
