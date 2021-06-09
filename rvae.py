@@ -17,6 +17,7 @@ from config import Config
 # SETTINGS ------------------------------------------
 datasets = Config("./datasets_info.json")
 dataset_name = datasets.MOVIELENS_1M if len(sys.argv) == 1 else sys.argv[1]
+copy_pasting_data = False if len(sys.argv) < 3 else eval(sys.argv[2])
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 config = Config("./rvae_config.json")
 config.metrics_scale = eval(config.metrics_scale)
@@ -26,7 +27,7 @@ config.baseline_flag = eval(config.baseline_flag)
 BASELINE = config.baseline_flag  # Baseline/LowPop model
 # ---------------------------------------------------
 
-# set seed tor experiment reproducibility
+# set seed for experiment reproducibility
 SEED = config.seed
 set_seed(SEED)
 
@@ -408,5 +409,15 @@ for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
 plt.savefig(os.path.join(run_dir, 'hr.png'));
 plt.savefig(os.path.join(run_dir, 'hr.pdf'));
 
+if copy_pasting_data:
+    main_directory = os.path.join('./data', dataset_name, "baseline" if BASELINE else "popularity_low")
+    # deleting the main directory used by the ensemble script
+    import shutil
+    shutil.rmtree(main_directory, ignore_errors=True)
+    # moving the run directory into the main
+    from distutils.dir_util import copy_tree
+    os.makedirs(main_directory)
+    copy_tree(run_dir, main_directory)
+    
 print('DONE')
 print(run_dir)
