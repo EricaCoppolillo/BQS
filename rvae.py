@@ -1,5 +1,6 @@
 import collections
 import os
+import sys
 from datetime import datetime
 import matplotlib.pyplot as plt
 import time
@@ -15,8 +16,8 @@ from config import Config
 
 # SETTINGS ------------------------------------------
 datasets = Config("./datasets_info.json")
-dataset_name = datasets.MOVIELENS_1M
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+dataset_name = datasets.MOVIELENS_1M if len(sys.argv) == 1 else sys.argv[1]
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
 config = Config("./rvae_config.json")
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
@@ -199,7 +200,7 @@ print(config.p_dims)
 model = MultiVAE(config.p_dims)
 model = model.to(device)
 
-criterion = rvae_rank_pair_loss(popularity=popularity if config.use_popularity else None,
+criterion = rvae_rank_pair_loss(device=device, popularity=popularity if config.use_popularity else None,
                                 scale=config.scale,
                                 thresholds=thresholds,
                                 frequencies=frequencies)
@@ -256,7 +257,7 @@ except KeyboardInterrupt:
 
 model = MultiVAE(config.p_dims)
 model = model.to(device)
-model.load_state_dict(torch.load(file_model))
+model.load_state_dict(torch.load(file_model, map_location=device))
 model.eval()
 
 """# Training stats"""
@@ -407,4 +408,5 @@ for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
 plt.savefig(os.path.join(run_dir, 'hr.png'));
 plt.savefig(os.path.join(run_dir, 'hr.pdf'));
 
-print('DONE', run_dir)
+print('DONE')
+print(run_dir)

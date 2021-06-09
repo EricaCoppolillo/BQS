@@ -3,6 +3,8 @@ import numpy as np
 import random
 import json
 import torch
+import re
+
 
 def load_dataset(fname, to_pickle=True):
     if to_pickle:
@@ -47,8 +49,10 @@ def y_custom(popularity, position, cutoff, settings):
     y = y_popularity(popularity, settings) * y_position(position, cutoff, settings)
     return y
 
+
 def naive_sparse2tensor(data):
     return torch.FloatTensor(data.toarray() if hasattr(data, 'toarray') else data)
+
 
 def set_seed(seed):
     if not seed:
@@ -61,3 +65,9 @@ def set_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def clean_json_string(json_str):
+    p = re.compile('(?<!\\\\)\'')
+    json_str = p.sub('\"', json_str)
+    return json_str

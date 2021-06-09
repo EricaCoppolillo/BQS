@@ -421,9 +421,9 @@ class EnsembleDataLoader:
 
         p_dims.append(self.n_items)
         self.baseline_model = MultiVAE(p_dims)
-        self.baseline_model.load_state_dict(torch.load(baseline_file_model))
+        self.baseline_model.load_state_dict(torch.load(baseline_file_model, map_location=device))
         self.popularity_model = MultiVAE(p_dims)
-        self.popularity_model.load_state_dict(torch.load(popularity_file_model))
+        self.popularity_model.load_state_dict(torch.load(popularity_file_model, map_location=device))
         self.baseline_model.to(device)
         self.popularity_model.to(device)
         self.baseline_model.eval()

@@ -77,8 +77,9 @@ class ensemble_rvae_loss(nn.Module):
 
 
 class rvae_rank_pair_loss(rvae_loss):
-    def __init__(self, **kargs):
+    def __init__(self, device, **kargs):
         super(rvae_rank_pair_loss, self).__init__(**kargs)
+        self.device = device
 
     def log_p(self, x, y, pos_items, neg_items, mask, BASELINE):
         weight = mask
@@ -89,7 +90,7 @@ class rvae_rank_pair_loss(rvae_loss):
         pop_pos = self.popularity[pos_items.long()]
         pop_neg = self.popularity[neg_items.long()]
 
-        filter_pos = (pop_pos <= self.thresholds[0]).float().cuda()  # low
+        filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
         filter_neg = (pop_neg > self.thresholds[0]).float()  # low
 
         # freq_pos = self.frequencies[pos_items.long()].float()

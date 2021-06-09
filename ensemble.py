@@ -1,5 +1,6 @@
 import collections
 import os
+import sys
 from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns; sns.set()
@@ -16,8 +17,8 @@ from config import Config
 
 # SETTINGS ------------------------------------------
 datasets = Config("./datasets_info.json")
-dataset_name = datasets.MOVIELENS_1M
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+dataset_name = datasets.MOVIELENS_1M if len(sys.argv) == 1 else sys.argv[1]
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
 config = Config("./rvae_config.json")
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
