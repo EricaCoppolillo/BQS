@@ -413,11 +413,12 @@ if copy_pasting_data:
     main_directory = os.path.join('./data', dataset_name, "baseline" if BASELINE else "popularity_low")
     # deleting the main directory used by the ensemble script
     import shutil
-    shutil.rmtree(main_directory, ignore_errors=True)
+    if os.path.isdir(main_directory):
+        shutil.rmtree(main_directory, ignore_errors=True)
     # moving the run directory into the main
     from distutils.dir_util import copy_tree
     os.makedirs(main_directory)
     copy_tree(run_dir, main_directory)
-    
+
 print('DONE')
 print(run_dir)
