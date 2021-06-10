@@ -14,12 +14,14 @@ from loss_func import rvae_rank_pair_loss
 from data_loaders import DataLoader
 from config import Config
 
-# SETTINGS ------------------------------------------
 datasets = Config("./datasets_info.json")
-dataset_name = datasets.MOVIELENS_1M if len(sys.argv) == 1 else sys.argv[1]
-copy_pasting_data = False if len(sys.argv) < 3 else eval(sys.argv[2])
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
+# SETTINGS ------------------------------------------
 config = Config("./rvae_config.json")
+
+os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
+dataset_name = eval(config.dataset_name)
+copy_pasting_data = eval(config.copy_pasting_data)
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
