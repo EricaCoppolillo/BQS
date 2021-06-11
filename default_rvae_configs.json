@@ -29,7 +29,7 @@
     "CUDA_VISIBLE_DEVICES": "",
     "dataset_name": "datasets.MOVIELENS_20M",
     "baseline_flag": "True",
-    "copy_pasting_data": "False",
+    "copy_pasting_data": "True",
 
     "n_epochs": 50,
     "batch_size":1024,
@@ -55,7 +55,7 @@
     "CUDA_VISIBLE_DEVICES": "",
     "dataset_name": "datasets.CITEULIKE",
     "baseline_flag": "True",
-    "copy_pasting_data": "False",
+    "copy_pasting_data": "True",
 
     "n_epochs": 50,
     "batch_size":1024,
@@ -81,7 +81,7 @@
     "CUDA_VISIBLE_DEVICES": "",
     "dataset_name": "datasets.PINTEREST",
     "baseline_flag": "True",
-    "copy_pasting_data": "False",
+    "copy_pasting_data": "True",
 
     "n_epochs": 50,
     "batch_size":1024,
@@ -107,7 +107,7 @@
     "CUDA_VISIBLE_DEVICES": "",
     "dataset_name": "datasets.EPINIONS",
     "baseline_flag": "True",
-    "copy_pasting_data": "False",
+    "copy_pasting_data": "True",
 
     "n_epochs": 50,
     "batch_size":1024,
@@ -133,7 +133,7 @@
     "CUDA_VISIBLE_DEVICES": "",
     "dataset_name": "datasets.NETFLIX",
     "baseline_flag": "True",
-    "copy_pasting_data": "False",
+    "copy_pasting_data": "True",
 
     "n_epochs": 50,
     "batch_size":1024,
