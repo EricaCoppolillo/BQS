@@ -3,7 +3,7 @@
     "CUDA_VISIBLE_DEVICES": "",
     "dataset_name": "datasets.MOVIELENS_1M",
     "baseline_flag": "True",
-    "copy_pasting_data": "False",
+    "copy_pasting_data": "True",
 
     "n_epochs": 50,
     "batch_size":1024,
