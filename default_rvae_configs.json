@@ -1,7 +1,11 @@
 {
   "MOVIELENS_1M": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "dataset_name": "datasets.MOVIELENS_1M",
     "baseline_flag": "True",
-    "n_epochs": 1,
+    "copy_pasting_data": "False",
+
+    "n_epochs": 50,
     "batch_size":1024,
     "weight_decay":0.0,
     "learning_rate":1e-3,
@@ -22,7 +26,11 @@
   },
 
   "MOVIELENS_20M": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "dataset_name": "datasets.MOVIELENS_20M",
     "baseline_flag": "True",
+    "copy_pasting_data": "False",
+
     "n_epochs": 50,
     "batch_size":1024,
     "weight_decay":0.0,
@@ -44,7 +52,11 @@
   },
 
   "CITEULIKE": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "dataset_name": "datasets.CITEULIKE",
     "baseline_flag": "True",
+    "copy_pasting_data": "False",
+
     "n_epochs": 50,
     "batch_size":1024,
     "weight_decay":0.0,
@@ -66,7 +78,11 @@
   },
 
   "PINTEREST": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "dataset_name": "datasets.PINTEREST",
     "baseline_flag": "True",
+    "copy_pasting_data": "False",
+
     "n_epochs": 50,
     "batch_size":1024,
     "weight_decay":0.0,
@@ -88,7 +104,11 @@
   },
 
   "EPINIONS": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "dataset_name": "datasets.EPINIONS",
     "baseline_flag": "True",
+    "copy_pasting_data": "False",
+
     "n_epochs": 50,
     "batch_size":1024,
     "weight_decay":0.0,
@@ -110,7 +130,11 @@
   },
 
   "NETFLIX": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "dataset_name": "datasets.NETFLIX",
     "baseline_flag": "True",
+    "copy_pasting_data": "False",
+
     "n_epochs": 50,
     "batch_size":1024,
     "weight_decay":0.0,

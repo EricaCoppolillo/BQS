@@ -19,7 +19,7 @@ from config import Config
 datasets = Config("./datasets_info.json")
 dataset_name = datasets.MOVIELENS_1M if len(sys.argv) == 1 else sys.argv[1]
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
-config = Config("./rvae_config.json")
+config = Config("./ensemble_config.json")
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)

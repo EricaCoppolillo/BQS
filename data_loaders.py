@@ -234,7 +234,7 @@ class DataLoader:
                 frequency = self.frequencies[item]
             else:
                 frequency = self.pos_neg_ratio
-            positives[0:0] = [item] * frequency
+            positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
 
         negatives = self._sample_negatives(pos, len(positives))
         self.max_width = max(self.max_width, len(negatives))
