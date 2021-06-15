@@ -1,7 +1,7 @@
 {
   "CUDA_VISIBLE_DEVICES": "",
-  "dataset_name": "datasets.NETFLIX",
-  "baseline_flag": "True",
+  "dataset_name": "datasets.MOVIELENS_20M",
+  "baseline_flag": "False",
   "copy_pasting_data": "False",
 
   "n_epochs": 1,

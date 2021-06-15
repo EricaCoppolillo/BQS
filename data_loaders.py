@@ -1,6 +1,7 @@
 import os
+from tempfile import mkdtemp
 import gc
-
+from scipy.sparse import lil_matrix
 from util import *
 from models import *
 
@@ -73,9 +74,12 @@ class DataLoader:
         print('Done.')
 
     def _generate_mask_tr(self, tag):
-        self.mask[tag] = np.zeros((self.size[tag], self.max_width))
-        pos_temp = np.zeros((self.size[tag], self.max_width))
-        neg_temp = np.zeros((self.size[tag], self.max_width))
+        # mask_filename = os.path.join(mkdtemp(), 'mask.dat') np.memmap(mask_filename, dtype=np.uint8, mode='w+', shape=(self.size[tag], self.max_width))
+        self.mask[tag] = lil_matrix((self.size[tag], self.max_width), dtype=np.uint8) # np.zeros((self.size[tag], self.max_width))
+        # pos_filename = os.path.join(mkdtemp(), 'pos.dat') np.memmap(pos_filename, dtype=np.uint16, mode='w+', shape=(self.size[tag], self.max_width))
+        pos_temp =  lil_matrix((self.size[tag], self.max_width), dtype=np.uint16)
+        # neg_filename = os.path.join(mkdtemp(), 'neg.dat') np.memmap(neg_filename, dtype=np.uint16, mode='w+', shape=(self.size[tag], self.max_width))
+        neg_temp =  lil_matrix((self.size[tag], self.max_width), dtype=np.uint16)
 
         for row in range(self.size[tag]):
             self.mask[tag][row, :len(self.pos[tag][row])] = [1] * len(self.pos[tag][row])
