@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+from config import Config
+
+model_types = Config("./model_type_info.json")
 
 
 class rvae_loss(nn.Module):
@@ -36,9 +39,7 @@ class rvae_loss(nn.Module):
 
     def forward(self, x, y, mu, logvar, anneal, **args):
         n_llk = self.log_p(x, y, **args)
-
         loss = n_llk + anneal * self.kld(mu, logvar)
-        # loss = n_llk + self.kld(mu, logvar)
 
         return loss
 
@@ -81,35 +82,31 @@ class rvae_rank_pair_loss(rvae_loss):
         super(rvae_rank_pair_loss, self).__init__(**kargs)
         self.device = device
 
-    def log_p(self, x, y, pos_items, neg_items, mask, BASELINE):
+    def log_p(self, x, y, pos_items, neg_items, mask, model_type):
         weight = mask
 
-        y1 = torch.gather(y, 1, (pos_items).long()) * mask
-        y2 = torch.gather(y, 1, (neg_items).long()) * mask
+        y1 = torch.gather(y, 1, pos_items.long()) * mask
+        y2 = torch.gather(y, 1, neg_items.long()) * mask
 
-        pop_pos = self.popularity[pos_items.long()]
-        pop_neg = self.popularity[neg_items.long()]
+        # Building filters for different classes of items
+        if model_type == model_types.MED:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (self.thresholds[0] < pop_pos <= self.thresholds[1]).float().to(self.device)  # medium
+        elif model_type == model_types.HIGH:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (pop_pos > self.thresholds[1]).float().to(self.device)  # high
+        elif model_type == model_types.LOW:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
 
-        filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
-        filter_neg = (pop_neg > self.thresholds[0]).float()  # low
-
-        # freq_pos = self.frequencies[pos_items.long()].float()
-        # freq_neg = self.frequencies[neg_items.long()].float()
-
-        if BASELINE:
+        if model_type == model_types.BASELINE:
             neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
         else:
             neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
-            # neg_ll = - torch.sum(self.logsigmoid((1 - pop_pos) * y1 - y2) * weight) / mask.sum()
-            # neg_ll = - torch.sum(filter_pos * filter_neg*self.logsigmoid(y1 - y2) * weight) / mask.sum()
-
-        del pop_pos
-        del pop_neg
-        del filter_pos
-        del filter_neg
+            del pop_pos
+            del filter_pos
 
         torch.cuda.empty_cache()
-
         return neg_ll
 
 
@@ -118,20 +115,7 @@ class ensemble_rvae_rank_pair_loss(rvae_loss):
         super(ensemble_rvae_rank_pair_loss, self).__init__(**kargs)
 
     def log_p(self, x, y, pos_items, neg_items, mask):
-        '''
-        weight = mask
-
-        y1 = torch.gather(y, 1, (pos_items).long()) * mask
-        y2 = torch.gather(y, 1, (neg_items).long()) * mask
-
-        neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
-
-        del y1
-        del y2
-        torch.cuda.empty_cache()
-        '''
         return 0
-        # return neg_ll
 
 
 class rvae_focal_loss(rvae_loss):
@@ -144,22 +128,13 @@ class rvae_focal_loss(rvae_loss):
     def log_p(self, x, y, pos_items, neg_items, mask):
         weight = self.weight(pos_items, mask)
 
-        # y1 = torch.gather(y, 1, (pos_items).long()) * mask
-        # y2 = torch.gather(y, 1, (neg_items).long()) * mask
-        # neg_ll = - torch.sum(self.logsigmoid(y1 - y2)*weight) / mask.sum()
-        # neg_ll = - torch.pow(1 - torch.exp(neg_ll), 5) * neg_ll
-
-        # log_p = torch.fun.sigmoid(weight*score)
-        y1 = torch.gather(y, 1, (pos_items).long())
-        y2 = torch.gather(y, 1, (neg_items).long())
+        y1 = torch.gather(y, 1, pos_items.long())
+        y2 = torch.gather(y, 1, neg_items.long())
         p = self.sigmoid(y1 - y2) * mask
         w = weight / self.scale * p
         w = w * (1 - p).pow(self.gamma)
 
         neg_ll = - w * self.logsigmoid(y1 - y2) * mask
-
-        # neg_ll = - torch.pow(1 - torch.exp(log_p), self.beta) * weight * log_p
-
         neg_ll = torch.sum(neg_ll) / mask.sum()
 
         return neg_ll
@@ -175,22 +150,12 @@ class ensemble_rvae_focal_loss(ensemble_rvae_loss):
     def log_p(self, x, y, pos_items, neg_items, mask):
         weight = self.weight(pos_items, mask)
 
-        # y1 = torch.gather(y, 1, (pos_items).long()) * mask
-        # y2 = torch.gather(y, 1, (neg_items).long()) * mask
-        # neg_ll = - torch.sum(self.logsigmoid(y1 - y2)*weight) / mask.sum()
-        # neg_ll = - torch.pow(1 - torch.exp(neg_ll), 5) * neg_ll
-
-        # log_p = torch.fun.sigmoid(weight*score)
-        y1 = torch.gather(y, 1, (pos_items).long())
-        y2 = torch.gather(y, 1, (neg_items).long())
+        y1 = torch.gather(y, 1, pos_items.long())
+        y2 = torch.gather(y, 1, neg_items.long())
         p = self.sigmoid(y1 - y2) * mask
         w = weight / self.scale * p
         w = w * (1 - p).pow(self.gamma)
 
         neg_ll = - w * self.logsigmoid(y1 - y2) * mask
-
-        # neg_ll = - torch.pow(1 - torch.exp(log_p), self.beta) * weight * log_p
-
         neg_ll = torch.sum(neg_ll) / mask.sum()
-
         return neg_ll

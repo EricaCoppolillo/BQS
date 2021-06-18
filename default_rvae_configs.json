@@ -22,6 +22,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 5,
     "seed": 8734
   },
 
@@ -48,6 +49,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 5,
     "seed": 8734
   },
 
@@ -74,6 +76,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 5,
     "seed": 8734
   },
 
@@ -100,6 +103,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 5,
     "seed": 8734
   },
 
@@ -126,6 +130,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 5,
     "seed": 8734
   },
 
@@ -152,6 +157,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 5,
     "seed": 8734
   }
 }

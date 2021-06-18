@@ -1,30 +1,31 @@
-import collections
-import os
-import sys
-from datetime import datetime
-import matplotlib.pyplot as plt
-import seaborn as sns; sns.set()
-import torch
-import numpy as np
-import json
-
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from data_loaders import EnsembleDataLoader
 from models import EnsembleMultiVAE
 from loss_func import ensemble_rvae_rank_pair_loss
 from config import Config
+import torch
+import numpy as np
+import json
+import collections
+import os
+from datetime import datetime
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.set()
 
 # SETTINGS ------------------------------------------
-datasets = Config("./datasets_info.json")
-dataset_name = datasets.MOVIELENS_1M if len(sys.argv) == 1 else sys.argv[1]
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
 config = Config("./ensemble_config.json")
+datasets = Config("./datasets_info.json")
+os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
+dataset_name = eval(config.dataset_name)
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
 # ---------------------------------------------------
 
+# set seed for experiment reproducibility
 SEED = config.seed
 set_seed(SEED)
 
@@ -71,7 +72,8 @@ In test the data is reported with 3 masks of items with less, middle and top pop
 """
 
 # Dataloader
-trainloader = EnsembleDataLoader(data_dir, config.p_dims, use_popularity=True, device=device)
+trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                 use_popularity=True, device=device)
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
 thresholds = trainloader.thresholds
@@ -93,12 +95,9 @@ def evaluate(dataloader, tag='validation'):
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
+        for batch_idx, (x, _, _, _, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
                 dataloader.iter_test_ensemble(batch_size=config.batch_size, tag=tag, device=device)):
             x_tensor = naive_sparse2tensor(x).to(device)
-            # pos = naive_sparse2tensor(pos).to(device)
-            # neg = naive_sparse2tensor(neg).to(device)
-            # mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
 
             batch_num += 1
@@ -108,9 +107,7 @@ def evaluate(dataloader, tag='validation'):
 
             y = model(x_input, y_a, y_b, True)
 
-            # loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
-
-            result['loss'] += 0  # loss.item()
+            result['loss'] += 0
 
             recon_batch_cpu = y.cpu().numpy()
 
@@ -138,9 +135,9 @@ model = EnsembleMultiVAE(n_items, popularity, thresholds)
 model = model.to(device)
 
 criterion = ensemble_rvae_rank_pair_loss(popularity=popularity,
-                                scale=config.scale,
-                                thresholds=thresholds,
-                                frequencies=frequencies)
+                                         scale=config.scale,
+                                         thresholds=thresholds,
+                                         frequencies=frequencies)
 best_loss = np.Inf
 
 stat_metric = []

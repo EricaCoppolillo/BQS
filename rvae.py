@@ -15,18 +15,18 @@ from data_loaders import DataLoader
 from config import Config
 
 datasets = Config("./datasets_info.json")
+model_types = Config("./model_type_info.json")
 
 # SETTINGS ------------------------------------------
 config = Config("./rvae_config.json")
 
 os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
 dataset_name = eval(config.dataset_name)
+model_type = eval(config.model_type)
 copy_pasting_data = eval(config.copy_pasting_data)
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
-config.baseline_flag = eval(config.baseline_flag)
-BASELINE = config.baseline_flag  # Baseline/LowPop model
 # ---------------------------------------------------
 
 # set seed for experiment reproducibility
@@ -54,11 +54,7 @@ if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
 run_time = datetime.today().strftime('%Y%m%d_%H%M')
-if BASELINE:
-    type_str = 'baseline'
-else:
-    type_str = 'popularity_low'
-run_dir = os.path.join(result_dir, f'{type_str}_{run_time}')
+run_dir = os.path.join(result_dir, f'{model_type}_{run_time}')
 
 os.mkdir(run_dir)
 
@@ -67,12 +63,12 @@ file_model = os.path.join(run_dir, 'best_model.pth')
 
 to_pickle = True
 
-"""# Train and test"""
+""" Train and test"""
 
-if BASELINE:
-    trainloader = DataLoader(dataset_file, use_popularity=False)
+if model_type == model_types.BASELINE:
+    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, use_popularity=False)
 else:
-    trainloader = DataLoader(dataset_file, use_popularity=True)
+    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor, use_popularity=True)
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
@@ -118,7 +114,7 @@ def train(dataloader, epoch, optimizer):
 
         # loss = criterion(recon_batch, x, pos_items, neg_items, mask, mask, mu, logvar, anneal)
         loss = criterion(x, y, mu, logvar, anneal, pos_items=pos_items, neg_items=neg_items, mask=mask,
-                         BASELINE=BASELINE)
+                         model_type=model_type)
         loss.backward()
         optimizer.step()
 
@@ -139,6 +135,7 @@ def train(dataloader, epoch, optimizer):
 
         if CUDA:
             torch.cuda.empty_cache()
+            # print(f"[TRAIN]: Cuda cache emptied")
 
     return train_loss_cumulative / (1 + batch_idx)
 
@@ -147,6 +144,7 @@ top_k = (1, 5, 10)
 
 
 def evaluate(dataloader, normalized_popularity, tag='validation'):
+    # print("STARTING TO EVAL")
     # Turn on evaluation mode
     model.eval()
     accumulator = MetricAccumulator()
@@ -160,26 +158,28 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     with torch.no_grad():
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
                 dataloader.iter_test(batch_size=config.batch_size, tag=tag)):
+            # print(f"[EVAL]: Entering batch {batch_idx}")
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
             mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
-
+            # print("[EVAL]: batch data have been processed")
             batch_num += 1
             n_users_train += x_tensor.shape[0]
 
             x_input = x_tensor * (1 - mask_te)
             y, mu, logvar = model(x_input, True)
-
+            # print("[EVAL]: model forward done")
             #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
-            loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask, BASELINE=BASELINE)
-
+            loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
+            # print("[EVAL]: Loss computed")
             result['loss'] += loss.item()
 
             recon_batch_cpu = y.cpu().numpy()
 
             for k in top_k:
+                # print(f"[EVAL]: Computing metric for k={k}")
                 accumulator.compute_metric(x_input.cpu().numpy(),
                                            recon_batch_cpu,
                                            pos_te, neg_te,
@@ -209,7 +209,7 @@ criterion = rvae_rank_pair_loss(device=device, popularity=popularity if config.u
                                 frequencies=frequencies)
 # criterion = rvae_focal_loss(popularity=popularity if settings.use_popularity else None, scale=settings.scale)
 
-best_loss = np.Inf
+best_loss = -np.Inf
 
 stat_metric = []
 
@@ -248,9 +248,17 @@ try:
         print('-' * ls)
 
         # Save the model if the n100 is the best we've seen so far.
+        '''
         if best_loss > result['loss']:
             torch.save(model.state_dict(), file_model)
             best_loss = result['loss']
+        '''
+        # TODO: automating this code block with respect to the model type (e.g.: baseline, low, etc.)
+        LOW, MED, HIGH = 0, 1, 2
+        val_result = float(result["luciano_stat_by_pop@5"].split(",")[LOW])
+        if best_loss < val_result:
+            torch.save(model.state_dict(), file_model)
+            best_loss = val_result
 
 except KeyboardInterrupt:
     print('-' * 89)
@@ -412,7 +420,7 @@ plt.savefig(os.path.join(run_dir, 'hr.png'));
 plt.savefig(os.path.join(run_dir, 'hr.pdf'));
 
 if copy_pasting_data:
-    main_directory = os.path.join('./data', dataset_name, "baseline" if BASELINE else "popularity_low")
+    main_directory = os.path.join('./data', dataset_name, model_type)
     # deleting the main directory used by the ensemble script
     import shutil
     if os.path.isdir(main_directory):

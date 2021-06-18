@@ -1,13 +1,20 @@
 import os
-from tempfile import mkdtemp
 import gc
-from scipy.sparse import lil_matrix
+
+from tqdm import tqdm
+from scipy.sparse import csr_matrix
+from scipy.sparse import save_npz, load_npz
+from pathlib import Path
+import pickle
 from util import *
 from models import *
+from config import Config
+
+model_types = Config("./model_type_info.json")
 
 
 class DataLoader:
-    def __init__(self, file_tr, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False):
+    def __init__(self, file_tr, seed, decreasing_factor, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False):
 
         dataset = load_dataset(file_tr)
 
@@ -22,16 +29,15 @@ class DataLoader:
         self.med_pop = len([i for i in self.item_popularity if self.thresholds[0] < i <= self.thresholds[1]])
         self.high_pop = len([i for i in self.item_popularity if self.thresholds[1] < i])
 
-        # limit = self.high_pop
-        limit = 1
-
         self.n_items = len(self.item_popularity)
         self.use_popularity = use_popularity
         self.sorted_item_popularity = sorted(self.item_popularity)
+        limit = 1
         self.max_popularity = self.sorted_item_popularity[-limit]
         self.min_popularity = self.sorted_item_popularity[0]
 
-        gamma = self.pos_neg_ratio
+        self.decreasing_factor = decreasing_factor
+        gamma = self.pos_neg_ratio / decreasing_factor
         # gamma = 1
         self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
                             self.item_popularity]
@@ -57,14 +63,97 @@ class DataLoader:
 
         print('phase 1: Loading data...')
         self._initialize()
-        self._load_data(dataset)
+        # checking if data have already been computed
+        path = Path(file_tr)
+        par_dir = path.parent.absolute()
 
-        print('phase 2: Generating training masks...')
+        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", f"decreasing_factor_{decreasing_factor}",
+                                             str(seed))
 
-        for tag in ('train', 'validation', 'test'):
-            self._generate_mask_tr(tag)
-            print('type(self.data[tag])', type(self.data[tag]))
-            print('SET {}, shape {}, positives {}'.format(tag.upper(), self.data[tag].shape, self.data[tag].sum()))
+        if not os.path.exists(preprocessed_data_dir):
+            os.makedirs(preprocessed_data_dir)
+
+        def _dir_does_not_contain_files(input_path):
+            return len(os.listdir(input_path)) == 0
+
+        if _dir_does_not_contain_files(preprocessed_data_dir):
+            print("Generating pre-processed data from scratch")
+            self._load_data(dataset, preprocessed_data_dir)
+        else:
+            print("Loading pre-processed data from disk")
+            tags = ["train", "validation", "test"]
+            for tag in tags:
+                with open(os.path.join(preprocessed_data_dir, f'pos_{tag}.pkl'), 'rb') as f:
+                    self.pos[tag] = pickle.load(f)
+                with open(os.path.join(preprocessed_data_dir, f'neg_{tag}.pkl'), 'rb') as f:
+                    self.neg[tag] = pickle.load(f)
+                self.data[tag] = np.load(os.path.join(preprocessed_data_dir, f"data_{tag}.npy"))
+                self.size[tag] = self.data[tag].shape[0]
+                if tag in tags[1:]:  # all except train
+                    with open(os.path.join(preprocessed_data_dir, f'pos_rank_{tag}.pkl'), 'rb') as f:
+                        self.pos_rank[tag] = pickle.load(f)
+                    with open(os.path.join(preprocessed_data_dir, f'neg_rank_{tag}.pkl'), 'rb') as f:
+                        self.neg_rank[tag] = pickle.load(f)
+
+            with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'rb') as f:
+                self.max_width = pickle.load(f)
+
+        print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
+
+        def _converting_to_csr_matrix(x, input_shape, desc):
+            rows = []
+            cols = []
+            vals = []
+            for i, elem in tqdm(enumerate(x), desc=desc):  # users loop
+                for j in range(len(elem)):  # pos/neg loop
+                    rows.append(i)
+                    cols.append(j)
+                    vals.append(elem[j])
+            return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.int32)
+
+        def _creating_csr_mask(x, input_shape, desc):
+            rows = []
+            cols = []
+            vals = []
+            for i, elem in tqdm(enumerate(x), desc=desc):
+                for j in range(len(elem)):
+                    rows.append(i)
+                    cols.append(j)
+                    vals.append(1)
+            return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
+
+        # check if sparse matrices have already been computed
+        dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", f"decreasing_factor_{decreasing_factor}"
+                                               , str(seed))
+        if not os.path.exists(dir_for_sparse_matrices):
+            os.makedirs(dir_for_sparse_matrices)
+
+        self.pos_sparse = dict()
+        self.neg_sparse = dict()
+        self.mask_sparse = dict()
+
+        if _dir_does_not_contain_files(dir_for_sparse_matrices):
+            print("Generating pos/neg/masks from scratch")
+            for tag in self.pos:
+                shape = [self.size[tag], self.max_width]
+                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape, desc="Positive Items")
+                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape, desc="Positive Items")
+                self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], input_shape=shape, desc="Mask Items")
+            # save matrices
+            for tag in self.pos:
+                save_npz(os.path.join(dir_for_sparse_matrices, f"pos_{tag}.npz"), self.pos_sparse[tag])
+                save_npz(os.path.join(dir_for_sparse_matrices, f"neg_{tag}.npz"), self.neg_sparse[tag])
+                save_npz(os.path.join(dir_for_sparse_matrices, f"mask_{tag}.npz"), self.mask_sparse[tag])
+        else:
+            # load matrices
+            print("Loading stored pos/neg/mask matrices")
+            for tag in self.pos:
+                self.pos_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"pos_{tag}.npz"))
+                self.neg_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"neg_{tag}.npz"))
+                self.mask_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"mask_{tag}.npz"))
 
         print('phase 3: generating test masks...')
 
@@ -72,22 +161,6 @@ class DataLoader:
             self._generate_mask_te(tag)
 
         print('Done.')
-
-    def _generate_mask_tr(self, tag):
-        # mask_filename = os.path.join(mkdtemp(), 'mask.dat') np.memmap(mask_filename, dtype=np.uint8, mode='w+', shape=(self.size[tag], self.max_width))
-        self.mask[tag] = lil_matrix((self.size[tag], self.max_width), dtype=np.uint8) # np.zeros((self.size[tag], self.max_width))
-        # pos_filename = os.path.join(mkdtemp(), 'pos.dat') np.memmap(pos_filename, dtype=np.uint16, mode='w+', shape=(self.size[tag], self.max_width))
-        pos_temp =  lil_matrix((self.size[tag], self.max_width), dtype=np.uint16)
-        # neg_filename = os.path.join(mkdtemp(), 'neg.dat') np.memmap(neg_filename, dtype=np.uint16, mode='w+', shape=(self.size[tag], self.max_width))
-        neg_temp =  lil_matrix((self.size[tag], self.max_width), dtype=np.uint16)
-
-        for row in range(self.size[tag]):
-            self.mask[tag][row, :len(self.pos[tag][row])] = [1] * len(self.pos[tag][row])
-            pos_temp[row, :len(self.pos[tag][row])] = self.pos[tag][row]
-            neg_temp[row, :len(self.neg[tag][row])] = self.neg[tag][row]
-
-        self.pos[tag] = pos_temp
-        self.neg[tag] = neg_temp
 
     def _generate_mask_te(self, tag):
         self.mask_rank[tag] = np.zeros((self.size[tag], self.n_items), dtype=np.int8)
@@ -117,7 +190,7 @@ class DataLoader:
             self.pos_rank[tag] = []
             self.neg_rank[tag] = []
 
-    def _load_data(self, dataset):
+    def _load_data(self, dataset, preprocessed_data_dir):
         train = []
         validation = []
         test = []
@@ -127,24 +200,6 @@ class DataLoader:
         test_data = dataset['test_data']
 
         print('LEN TEST:', len(test_data.keys()))
-
-        # print('LEN TEST:',test_data)
-        '''
-        for user_id in training_data:
-            pos, neg = training_data[user_id]
-            assert len(neg) >= 100, f'fail train neg for user {user_id}'
-
-            items_np = np.zeros(self.n_items, dtype=np.int8)
-            items_np[pos] = 1
-            train.append(items_np)
-
-            pos, neg = self._generate_training_pairs(pos)
-
-            # print('pos:',pos)
-            # print('neg:',neg)
-            self.pos['train'].append(pos)
-            self.neg['train'].append(neg)
-        '''
 
         for user_id in training_data:
             if user_id % 1000 == 0:
@@ -224,6 +279,24 @@ class DataLoader:
             self.data['test'][:] = test[:]
             self.size['test'] = len(test)
 
+        # saving artifacts on disk
+        tags = ["train", "validation", "test"]
+        for tag in tags:
+            with open(os.path.join(preprocessed_data_dir, f'pos_{tag}.pkl'), 'wb') as f:
+                pickle.dump(self.pos[tag], f)
+            with open(os.path.join(preprocessed_data_dir, f'neg_{tag}.pkl'), 'wb') as f:
+                pickle.dump(self.neg[tag], f)
+            np.save(os.path.join(preprocessed_data_dir, f"data_{tag}.npy"), self.data[tag])
+            if tag in tags[1:]: # all except train
+                with open(os.path.join(preprocessed_data_dir, f'pos_rank_{tag}.pkl'), 'wb') as f:
+                    pickle.dump(self.pos_rank[tag], f)
+                with open(os.path.join(preprocessed_data_dir, f'neg_rank_{tag}.pkl'), 'wb') as f:
+                    pickle.dump(self.neg_rank[tag], f)
+
+        with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'wb') as f:
+            pickle.dump(self.max_width, f)
+
+
     def _sample_negatives(self, pos, size):
         all_items = set(range(len(self.item_popularity)))
         all_negatives = list(all_items - set(pos))
@@ -255,23 +328,16 @@ class DataLoader:
 
         assert (tag in ('train', 'validation', 'test'))
 
-        # idxlist = np.arange(self._N)
         idxlist = np.arange(self.data[tag].shape[0])
         np.random.shuffle(idxlist)
-
         N = idxlist.shape[0]
-
-        idx = np.argsort(self.frequencies)
-
         for start_idx in range(0, N, batch_size):
             end_idx = min(start_idx + batch_size, N)
-
-            x = self.data[tag][idxlist[start_idx:end_idx]]
-
-            pos = self.pos[tag][idxlist[start_idx:end_idx]]
-            neg = self.neg[tag][idxlist[start_idx:end_idx]]
-            mask = self.mask[tag][idxlist[start_idx:end_idx]]
-
+            raw_idxs = idxlist[start_idx:end_idx]
+            x = self.data[tag][raw_idxs]
+            mask = self.mask_sparse[tag][raw_idxs].A
+            pos = self.pos_sparse[tag][raw_idxs].A
+            neg = self.neg_sparse[tag][raw_idxs].A
             yield x, pos, neg, mask
 
     def iter_test(self, batch_size=256, tag='test'):
@@ -287,24 +353,22 @@ class DataLoader:
         assert (tag in ('validation', 'test'))
 
         N = self.size[tag]
+        idxlist = np.arange(self.data[tag].shape[0])
         for start_idx in range(0, N, batch_size):
             end_idx = min(start_idx + batch_size, N)
 
+            raw_idxs = idxlist[start_idx:end_idx]
+
             x = self.data[tag][start_idx:end_idx]
 
-            pos = self.pos[tag][start_idx:end_idx]
-            neg = self.neg[tag][start_idx:end_idx]
-
-            mask = self.mask[tag][start_idx:end_idx]
+            # generating pos, neg, mask on-the-fly
+            mask = self.mask_sparse[tag][raw_idxs].A
+            pos = self.pos_sparse[tag][raw_idxs].A
+            neg = self.neg_sparse[tag][raw_idxs].A
 
             pos_te = self.pos_rank[tag][start_idx:end_idx]
             neg_te = self.neg_rank[tag][start_idx:end_idx]
-
             mask_pos_te = self.mask_rank[tag][start_idx:end_idx]
-
-            # print('>>> pos_te:',pos_te)
-            # print('>>> neg_te:', neg_te)
-            # print('>>> mask_pos_te:', mask_pos_te)
 
             yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te
 
@@ -362,8 +426,9 @@ class DataLoader:
 
 
 class EnsembleDataLoader:
-    def __init__(self, data_dir, p_dims, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False, chunk_size=1000
-                 , device="cpu"):
+    def __init__(self, data_dir, p_dims, seed, decreasing_factor, pos_neg_ratio=4, negatives_in_test=100,
+                 use_popularity=False, chunk_size=1000, device="cpu"):
+
         dataset_file = os.path.join(data_dir, 'data_rvae')
         dataset = load_dataset(dataset_file)
 
@@ -388,13 +453,10 @@ class EnsembleDataLoader:
         self.max_popularity = self.sorted_item_popularity[-limit]
         self.min_popularity = self.sorted_item_popularity[0]
 
-        gamma = self.pos_neg_ratio
-        # gamma = 1
+        self.decreasing_factor = decreasing_factor
+        gamma = self.pos_neg_ratio / decreasing_factor
         self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
                             self.item_popularity]
-
-        # self.frequencies = [int(round(sqrt(self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in self.item_popularity]
-        # self.double_frequencies = [self.max_popularity * (self.pos_neg_ratio / min(p, self.max_popularity)) for p in self.item_popularity]
 
         self.max_width = -1
 
@@ -416,9 +478,10 @@ class EnsembleDataLoader:
         print('sorted(frequencies):', sorted(self.frequencies)[:10])
 
         # loading models
-        print('loading ensemble models...')
-        baseline_dir = os.path.join(data_dir, 'baseline')
-        popularity_dir = os.path.join(data_dir, 'popularity_low')
+        print('Loading ensemble models...')
+        first_model, second_model = model_types.BASELINE, model_types.LOW
+        baseline_dir = os.path.join(data_dir, first_model)
+        popularity_dir = os.path.join(data_dir, second_model)
 
         baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
         popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
@@ -426,8 +489,10 @@ class EnsembleDataLoader:
         p_dims.append(self.n_items)
         self.baseline_model = MultiVAE(p_dims)
         self.baseline_model.load_state_dict(torch.load(baseline_file_model, map_location=device))
+        print(f"Loaded {first_model} model")
         self.popularity_model = MultiVAE(p_dims)
         self.popularity_model.load_state_dict(torch.load(popularity_file_model, map_location=device))
+        print(f"Loaded {second_model} model")
         self.baseline_model.to(device)
         self.popularity_model.to(device)
         self.baseline_model.eval()
@@ -436,19 +501,97 @@ class EnsembleDataLoader:
 
         print('phase 1: Loading data...')
         self._initialize()
-        self._load_data(dataset)
+        # checking if data have already been computed
+        preprocessed_data_dir = os.path.join(data_dir, "preprocessed_data", f"decreasing_factor_{decreasing_factor}",
+                                             str(seed))
 
-        print('phase 2: Generating training masks...')
+        if not os.path.exists(preprocessed_data_dir):
+            os.makedirs(preprocessed_data_dir)
 
-        for tag in ('train', 'validation', 'test'):
-            # print('LC > tag:', tag)
-            # print('LC > self.neg:', self.neg)
-            # print('LC > self.neg[tag]:', self.neg[tag])
-            # print('LC > self.size[tag]:', self.size[tag])
+        def _dir_does_not_contain_files(input_path):
+            return len(os.listdir(input_path)) == 0
 
-            self._generate_mask_tr(tag)
-            print('type(self.data[tag])', type(self.data[tag]))
-            print('SET {}, shape {}, positives {}'.format(tag.upper(), self.data[tag].shape, self.data[tag].sum()))
+        if _dir_does_not_contain_files(preprocessed_data_dir):
+            print("Generating pre-processed data from scratch")
+            self._load_data(dataset, preprocessed_data_dir)
+        else:
+            print("Loading pre-processed data from disk")
+            tags = ["train", "validation", "test"]
+            for tag in tags:
+                with open(os.path.join(preprocessed_data_dir, f'pos_{tag}.pkl'), 'rb') as f:
+                    self.pos[tag] = pickle.load(f)
+                with open(os.path.join(preprocessed_data_dir, f'neg_{tag}.pkl'), 'rb') as f:
+                    self.neg[tag] = pickle.load(f)
+                self.data[tag] = np.load(os.path.join(preprocessed_data_dir, f"data_{tag}.npy"))
+                self.size[tag] = self.data[tag].shape[0]
+                if tag in tags[1:]:  # all except train
+                    with open(os.path.join(preprocessed_data_dir, f'pos_rank_{tag}.pkl'), 'rb') as f:
+                        self.pos_rank[tag] = pickle.load(f)
+                    with open(os.path.join(preprocessed_data_dir, f'neg_rank_{tag}.pkl'), 'rb') as f:
+                        self.neg_rank[tag] = pickle.load(f)
+
+            with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'rb') as f:
+                self.max_width = pickle.load(f)
+
+        print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
+
+        def _converting_to_csr_matrix(x, input_shape, desc):
+            rows = []
+            cols = []
+            vals = []
+            for i, elem in tqdm(enumerate(x), desc=desc):  # users loop
+                for j in range(len(elem)):  # pos/neg loop
+                    rows.append(i)
+                    cols.append(j)
+                    vals.append(elem[j])
+            return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.int32)
+
+        def _creating_csr_mask(x, input_shape, desc):
+            rows = []
+            cols = []
+            vals = []
+            for i, elem in tqdm(enumerate(x), desc=desc):
+                for j in range(len(elem)):
+                    rows.append(i)
+                    cols.append(j)
+                    vals.append(1)
+            return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
+
+        # check if sparse matrices have already been computed
+        dir_for_sparse_matrices = os.path.join(data_dir, "sparse_matrices", f"decreasing_factor_{decreasing_factor}"
+                                               , str(seed))
+        if not os.path.exists(dir_for_sparse_matrices):
+            os.makedirs(dir_for_sparse_matrices)
+
+        self.pos_sparse = dict()
+        self.neg_sparse = dict()
+        self.mask_sparse = dict()
+
+        def _dir_does_not_contain_files(input_path):
+            return len(os.listdir(input_path)) == 0
+
+        if _dir_does_not_contain_files(dir_for_sparse_matrices):
+            print("Generating pos/neg/masks from scratch")
+            for tag in self.pos:
+                shape = [self.size[tag], self.max_width]
+                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], shape=shape, desc="Positive Items")
+                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], shape=shape, desc="Positive Items")
+                self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], shape=shape, desc="Mask Items")
+            # save matrices
+            for tag in self.pos:
+                save_npz(os.path.join(dir_for_sparse_matrices, f"pos_{tag}.npz"), self.pos_sparse[tag])
+                save_npz(os.path.join(dir_for_sparse_matrices, f"neg_{tag}.npz"), self.neg_sparse[tag])
+                save_npz(os.path.join(dir_for_sparse_matrices, f"mask_{tag}.npz"), self.mask_sparse[tag])
+        else:
+            # load matrices
+            print("Loading stored pos/neg/mask matrices")
+            for tag in self.pos:
+                self.pos_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"pos_{tag}.npz"))
+                self.neg_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"neg_{tag}.npz"))
+                self.mask_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"mask_{tag}.npz"))
 
         print('phase 3: generating test masks...')
 
@@ -523,7 +666,7 @@ class EnsembleDataLoader:
             self.pos_rank[tag] = []
             self.neg_rank[tag] = []
 
-    def _load_data(self, dataset):
+    def _load_data(self, dataset, preprocessed_data_dir):
         train = []
         validation = []
         test = []
@@ -531,22 +674,6 @@ class EnsembleDataLoader:
         training_data = dataset['training_data']
         validation_data = dataset['validation_data']
         test_data = dataset['test_data']
-        '''
-        for user_id in training_data:
-            pos, neg = training_data[user_id]
-            assert len(neg) >= 100, f'fail train neg for user {user_id}'
-
-            items_np = np.zeros(self.n_items, dtype=np.int8)
-            items_np[pos] = 1
-            train.append(items_np)
-
-            pos, neg = self._generate_training_pairs(pos)
-
-            # print('pos:',pos)
-            # print('neg:',neg)
-            self.pos['train'].append(pos)
-            self.neg['train'].append(neg)
-        '''
 
         for user_id in training_data:
             if user_id % 1000 == 0:
@@ -560,17 +687,6 @@ class EnsembleDataLoader:
 
             pos, neg = self._generate_pairs(pos)
 
-            # print('pos:',pos)
-            # print('neg:',neg)
-
-            # for start_idx in range(0, len(pos), self.chunk_size):
-            #   end_idx = min(start_idx + self.chunk_size, len(pos))
-            #  temp_pos = pos[start_idx:end_idx]
-            # temp_neg = neg[start_idx:end_idx]
-
-            # print('temp_pos:', temp_pos)
-            # print('temp_neg:', temp_neg)
-
             train.append(items_np)
             self.pos['train'].append(pos)
             self.neg['train'].append(neg)
@@ -578,11 +694,9 @@ class EnsembleDataLoader:
         print('self.max_width:', self.max_width)
 
         self.data['train'] = np.array(train, dtype=np.int8)
-        # self.data['train'] = np.memmap('train_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(train), self.n_items))
         self.data['train'][:] = train[:]
         self.size['train'] = len(train)
 
-        # del train
         gc.collect()
 
         for user_id in validation_data:
@@ -599,12 +713,6 @@ class EnsembleDataLoader:
             items_np[positives_te] = 1
 
             pos, neg = self._generate_pairs(positives_tr)
-
-            # for start_idx in range(0, len(pos), self.chunk_size):
-            #   end_idx = min(start_idx + self.chunk_size, len(pos))
-            #  temp_pos = pos[start_idx:end_idx]
-            # temp_neg = neg[start_idx:end_idx]
-
             validation.append(items_np)
 
             self.pos['validation'].append(pos)
@@ -615,10 +723,8 @@ class EnsembleDataLoader:
 
         if len(validation) > 0:
             self.data['validation'] = np.array(validation, dtype=np.int8)
-            # self.data['validation'] = np.memmap('validation_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(validation), self.n_items))
             self.data['validation'][:] = validation[:]
             self.size['validation'] = len(validation)
-            # del validation
             gc.collect()
 
         for user_id in test_data:
@@ -635,12 +741,6 @@ class EnsembleDataLoader:
             items_np[positives_te] = 1
 
             pos, neg = self._generate_pairs(positives_tr)
-
-            # for start_idx in range(0, len(pos), self.chunk_size):
-            #   end_idx = min(start_idx + self.chunk_size, len(pos))
-            #  temp_pos = pos[start_idx:end_idx]
-            # temp_neg = neg[start_idx:end_idx]
-
             test.append(items_np)
 
             self.pos['test'].append(pos)
@@ -651,11 +751,26 @@ class EnsembleDataLoader:
 
         if len(test) > 0:
             self.data['test'] = np.array(test, dtype=np.int8)
-            # self.data['test'] = np.memmap('test_memmapped.dat', dtype=np.int8, mode='w+', shape=(len(test), self.n_items))
             self.data['test'][:] = test[:]
             self.size['test'] = len(test)
-            # del test
             gc.collect()
+
+        # saving artifacts on disk
+        tags = ["train", "validation", "test"]
+        for tag in tags:
+            with open(os.path.join(preprocessed_data_dir, f'pos_{tag}.pkl'), 'wb') as f:
+                pickle.dump(self.pos[tag], f)
+            with open(os.path.join(preprocessed_data_dir, f'neg_{tag}.pkl'), 'wb') as f:
+                pickle.dump(self.neg[tag], f)
+            np.save(os.path.join(preprocessed_data_dir, f"data_{tag}.npy"), self.data[tag])
+            if tag in tags[1:]:  # all except train
+                with open(os.path.join(preprocessed_data_dir, f'pos_rank_{tag}.pkl'), 'wb') as f:
+                    pickle.dump(self.pos_rank[tag], f)
+                with open(os.path.join(preprocessed_data_dir, f'neg_rank_{tag}.pkl'), 'wb') as f:
+                    pickle.dump(self.neg_rank[tag], f)
+
+        with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'wb') as f:
+            pickle.dump(self.max_width, f)
 
     def _sample_negatives(self, pos, size):
         all_items = set(range(len(self.item_popularity)))
@@ -669,7 +784,6 @@ class EnsembleDataLoader:
         for item in pos:
             if self.use_popularity:
                 frequency = self.frequencies[item]
-                # frequency = self.pos_neg_ratio
             else:
                 frequency = self.pos_neg_ratio
             positives[0:0] = [item] * frequency
@@ -698,7 +812,6 @@ class EnsembleDataLoader:
 
         assert (tag in ('train', 'validation', 'test'))
 
-        # idxlist = np.arange(self._N)
         idxlist = np.arange(self.data[tag].shape[0])
         np.random.shuffle(idxlist)
 
@@ -749,10 +862,9 @@ class EnsembleDataLoader:
 
             x = self.data[tag][start_idx:end_idx]
 
-            pos = self.pos[tag][start_idx:end_idx]
-            neg = self.neg[tag][start_idx:end_idx]
-
-            mask = self.mask[tag][start_idx:end_idx]
+            pos = self.pos_sparse[tag][start_idx:end_idx].A
+            neg = self.neg_sparse[tag][start_idx:end_idx].A
+            mask = self.mask_sparse[tag][start_idx:end_idx].A
 
             pos_te = self.pos_rank[tag][start_idx:end_idx]
             neg_te = self.neg_rank[tag][start_idx:end_idx]
