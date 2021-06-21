@@ -253,7 +253,6 @@ try:
             torch.save(model.state_dict(), file_model)
             best_loss = result['loss']
         '''
-        # TODO: automating this code block with respect to the model type (e.g.: baseline, low, etc.)
         LOW, MED, HIGH = 0, 1, 2
         if model_type == model_types.BASELINE:
             val_result = result["loss"]
@@ -263,8 +262,8 @@ try:
             val_result = -float(result["luciano_stat_by_pop@5"].split(",")[LOW])
         elif model_type == model_types.MED:
             val_result = -float(result["luciano_stat_by_pop@5"].split(",")[MED])
-        elif model_type == model_types.MED:
-            val_result = -float(result["luciano_stat_by_pop@5"].split(",")[MED])
+        elif model_type == model_types.HIGH:
+            val_result = -float(result["luciano_stat_by_pop@5"].split(",")[HIGH])
         if val_result < best_loss:
             torch.save(model.state_dict(), file_model)
             best_loss = val_result
