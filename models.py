@@ -107,13 +107,14 @@ class MultiVAE(nn.Module):
 
 class EnsembleMultiVAE(nn.Module):
 
-    def __init__(self, n_items, popularity, thresholds=None, device="cpu"):
+    def __init__(self, n_items, popularity, thresholds=None, gamma=.4, device="cpu"):
         super(EnsembleMultiVAE, self).__init__()
 
         self.n_items = n_items
         self.test_print = False
         self.popularity = popularity
         self.thresholds = thresholds
+        self.gamma = gamma
 
         self.filter_a = torch.tensor(np.array(self.popularity) > self.thresholds[0]).to(device).float()  # baseline
         self.filter_b = torch.tensor(np.array(self.popularity) <= self.thresholds[0]).to(device).float()  # low
@@ -151,13 +152,12 @@ class EnsembleMultiVAE(nn.Module):
             self.test_print = False
 
         baseline = False
-        gamma = .4
 
         if baseline:
             y_e = z_a
         else:
             # y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
-            y_e = z_a + z_b * gamma
+            y_e = z_a + z_b * self.gamma
 
         '''
         CITE U LIKE ----------------------------------------------------------------------------------------------------

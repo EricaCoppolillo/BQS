@@ -131,7 +131,7 @@ torch.set_printoptions(profile="full")
 n_epochs = 1
 update_count = 0
 
-model = EnsembleMultiVAE(n_items, popularity, thresholds)
+model = EnsembleMultiVAE(n_items, popularity, thresholds=thresholds, gamma=config.ensemble_weight)
 model = model.to(device)
 
 criterion = ensemble_rvae_rank_pair_loss(popularity=popularity,

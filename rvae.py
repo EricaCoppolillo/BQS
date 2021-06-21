@@ -209,7 +209,7 @@ criterion = rvae_rank_pair_loss(device=device, popularity=popularity if config.u
                                 frequencies=frequencies)
 # criterion = rvae_focal_loss(popularity=popularity if settings.use_popularity else None, scale=settings.scale)
 
-best_loss = -np.Inf
+best_loss = np.Inf
 
 stat_metric = []
 
@@ -255,8 +255,17 @@ try:
         '''
         # TODO: automating this code block with respect to the model type (e.g.: baseline, low, etc.)
         LOW, MED, HIGH = 0, 1, 2
-        val_result = float(result["luciano_stat_by_pop@5"].split(",")[LOW])
-        if best_loss < val_result:
+        if model_type == model_types.BASELINE:
+            val_result = result["loss"]
+        # in the following elif blocks, the value is multiplied by -1 to invert the objective (minimizing instead of
+        # maximizing)
+        elif model_type == model_types.LOW:
+            val_result = -float(result["luciano_stat_by_pop@5"].split(",")[LOW])
+        elif model_type == model_types.MED:
+            val_result = -float(result["luciano_stat_by_pop@5"].split(",")[MED])
+        elif model_type == model_types.MED:
+            val_result = -float(result["luciano_stat_by_pop@5"].split(",")[MED])
+        if val_result < best_loss:
             torch.save(model.state_dict(), file_model)
             best_loss = val_result
 
