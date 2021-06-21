@@ -14,7 +14,8 @@ model_types = Config("./model_type_info.json")
 
 
 class DataLoader:
-    def __init__(self, file_tr, seed, decreasing_factor, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False):
+    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100,
+                 use_popularity=False):
 
         dataset = load_dataset(file_tr)
 
@@ -23,6 +24,7 @@ class DataLoader:
         self.thresholds = dataset['thresholds']
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
+        self.model_type = model_type
 
         # IMPROVEMENT
         self.low_pop = len([i for i in self.item_popularity if i <= self.thresholds[0]])
@@ -67,8 +69,8 @@ class DataLoader:
         path = Path(file_tr)
         par_dir = path.parent.absolute()
 
-        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", f"decreasing_factor_{decreasing_factor}",
-                                             str(seed))
+        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type
+                                             , f"decreasing_factor_{decreasing_factor}", str(seed))
 
         if not os.path.exists(preprocessed_data_dir):
             os.makedirs(preprocessed_data_dir)
@@ -123,8 +125,8 @@ class DataLoader:
             return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
 
         # check if sparse matrices have already been computed
-        dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", f"decreasing_factor_{decreasing_factor}"
-                                               , str(seed))
+        dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type,
+                                               f"decreasing_factor_{decreasing_factor}", str(seed))
         if not os.path.exists(dir_for_sparse_matrices):
             os.makedirs(dir_for_sparse_matrices)
 
@@ -136,8 +138,10 @@ class DataLoader:
             print("Generating pos/neg/masks from scratch")
             for tag in self.pos:
                 shape = [self.size[tag], self.max_width]
-                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape, desc="Positive Items")
-                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape, desc="Positive Items")
+                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape,
+                                                                 desc="Positive Items")
+                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape,
+                                                                 desc="Positive Items")
                 self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], input_shape=shape, desc="Mask Items")
             # save matrices
             for tag in self.pos:
@@ -287,7 +291,7 @@ class DataLoader:
             with open(os.path.join(preprocessed_data_dir, f'neg_{tag}.pkl'), 'wb') as f:
                 pickle.dump(self.neg[tag], f)
             np.save(os.path.join(preprocessed_data_dir, f"data_{tag}.npy"), self.data[tag])
-            if tag in tags[1:]: # all except train
+            if tag in tags[1:]:  # all except train
                 with open(os.path.join(preprocessed_data_dir, f'pos_rank_{tag}.pkl'), 'wb') as f:
                     pickle.dump(self.pos_rank[tag], f)
                 with open(os.path.join(preprocessed_data_dir, f'neg_rank_{tag}.pkl'), 'wb') as f:
@@ -295,7 +299,6 @@ class DataLoader:
 
         with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'wb') as f:
             pickle.dump(self.max_width, f)
-
 
     def _sample_negatives(self, pos, size):
         all_items = set(range(len(self.item_popularity)))

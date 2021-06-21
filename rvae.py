@@ -68,7 +68,8 @@ to_pickle = True
 if model_type == model_types.BASELINE:
     trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, use_popularity=False)
 else:
-    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor, use_popularity=True)
+    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor, use_popularity=True,
+                             model_type=model_type)
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
