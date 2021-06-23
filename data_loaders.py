@@ -577,9 +577,9 @@ class EnsembleDataLoader:
             print("Generating pos/neg/masks from scratch")
             for tag in self.pos:
                 shape = [self.size[tag], self.max_width]
-                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], shape=shape, desc="Positive Items")
-                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], shape=shape, desc="Positive Items")
-                self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], shape=shape, desc="Mask Items")
+                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape, desc="Positive Items")
+                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape, desc="Positive Items")
+                self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], input_shape=shape, desc="Mask Items")
             # save matrices
             for tag in self.pos:
                 save_npz(os.path.join(dir_for_sparse_matrices, f"pos_{tag}.npz"), self.pos_sparse[tag])
