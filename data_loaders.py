@@ -505,7 +505,7 @@ class EnsembleDataLoader:
         print('phase 1: Loading data...')
         self._initialize()
         # checking if data have already been computed
-        preprocessed_data_dir = os.path.join(data_dir, "preprocessed_data", f"decreasing_factor_{decreasing_factor}",
+        preprocessed_data_dir = os.path.join(data_dir, "preprocessed_data", "low", f"decreasing_factor_{decreasing_factor}",
                                              str(seed))
 
         if not os.path.exists(preprocessed_data_dir):
@@ -561,7 +561,7 @@ class EnsembleDataLoader:
             return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
 
         # check if sparse matrices have already been computed
-        dir_for_sparse_matrices = os.path.join(data_dir, "sparse_matrices", f"decreasing_factor_{decreasing_factor}"
+        dir_for_sparse_matrices = os.path.join(data_dir, "sparse_matrices", "low", f"decreasing_factor_{decreasing_factor}"
                                                , str(seed))
         if not os.path.exists(dir_for_sparse_matrices):
             os.makedirs(dir_for_sparse_matrices)
