@@ -66,7 +66,8 @@ to_pickle = True
 """ Train and test"""
 
 if model_type == model_types.BASELINE:
-    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, use_popularity=False)
+    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, use_popularity=False,
+                             model_type=model_type)
 else:
     trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor, use_popularity=True,
                              model_type=model_type)
