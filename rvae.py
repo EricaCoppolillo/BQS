@@ -260,11 +260,11 @@ try:
         # in the following elif blocks, the value is multiplied by -1 to invert the objective (minimizing instead of
         # maximizing)
         elif model_type == model_types.LOW:
-            val_result = -float(result["luciano_stat_by_pop@10"].split(",")[LOW])
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[LOW])
         elif model_type == model_types.MED:
-            val_result = -float(result["luciano_stat_by_pop@10"].split(",")[MED])
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[MED])
         elif model_type == model_types.HIGH:
-            val_result = -float(result["luciano_stat_by_pop@10"].split(",")[HIGH])
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[HIGH])
         if val_result < best_loss:
             torch.save(model.state_dict(), file_model)
             best_loss = val_result
