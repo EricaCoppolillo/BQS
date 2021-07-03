@@ -23,6 +23,7 @@
     "use_popularity": "True",
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
+    "best_model_k_metric": 10,
     "seed": 8734
   },
 
@@ -35,7 +36,7 @@
     "n_epochs": 50,
     "batch_size": 1024,
     "weight_decay": 0.0,
-    "learning_rate": 3e-5,
+    "learning_rate": 3e-4,
     "total_anneal_steps":200000,
     "anneal_cap":0.2,
     "sample_mask":100,
@@ -50,6 +51,7 @@
     "use_popularity": "True",
     "p_dims": "[200, 600]",
     "decreasing_factor": 500,
+    "best_model_k_metric": 10,
     "seed": 8734
   },
 
@@ -77,6 +79,7 @@
     "use_popularity": "True",
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
+    "best_model_k_metric": 10,
     "seed": 8734
   },
 
@@ -104,6 +107,7 @@
     "use_popularity": "True",
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
+    "best_model_k_metric": 10,
     "seed": 8734
   },
 
@@ -131,6 +135,7 @@
     "use_popularity": "True",
     "p_dims": "[200, 600]",
     "decreasing_factor": 50,
+    "best_model_k_metric": 10,
     "seed": 8734
   },
 
@@ -157,7 +162,8 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
-    "decreasing_factor": 2,
+    "decreasing_factor": 500,
+    "best_model_k_metric": 10,
     "seed": 8734
   }
 }

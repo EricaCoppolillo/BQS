@@ -1,5 +1,9 @@
 {
   "MOVIELENS_1M": {
+    "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.MOVIELENS_1M",
+    "ensemble_weight": 0.4,
+
     "batch_size":1024,
     "weight_decay":0.0,
     "learning_rate":1e-3,
@@ -16,10 +20,14 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 1,
     "seed": 8734
   },
 
   "MOVIELENS_20M": {
+    "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.MOVIELENS_20M",
+    "ensemble_weight": 0.4,
     "batch_size":1024,
     "weight_decay":0.0,
     "learning_rate":1e-3,
@@ -36,10 +44,14 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 500,
     "seed": 8734
   },
 
   "CITEULIKE": {
+    "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.CITEULIKE",
+    "ensemble_weight": 0.4,
     "batch_size":1024,
     "weight_decay":0.0,
     "learning_rate":1e-3,
@@ -56,10 +68,14 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 1,
     "seed": 8734
   },
 
   "PINTEREST": {
+    "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.PINTEREST",
+    "ensemble_weight": 0.4,
     "batch_size":1024,
     "weight_decay":0.0,
     "learning_rate":1e-3,
@@ -76,10 +92,14 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 1,
     "seed": 8734
   },
 
   "EPINIONS": {
+    "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.EPINIONS",
+    "ensemble_weight": 0.4,
     "batch_size":1024,
     "weight_decay":0.0,
     "learning_rate":1e-3,
@@ -96,10 +116,14 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "decreasing_factor": 50,
     "seed": 8734
   },
 
   "NETFLIX": {
+    "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.NETFLIX",
+    "ensemble_weight": 0.4,
     "batch_size":1024,
     "weight_decay":0.0,
     "learning_rate":1e-3,
@@ -116,6 +140,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
+    "ddecreasing_factor": 500,
     "seed": 8734
   }
 }
