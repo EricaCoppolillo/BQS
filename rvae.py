@@ -66,11 +66,9 @@ to_pickle = True
 """ Train and test"""
 
 if model_type == model_types.BASELINE:
-    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, use_popularity=False,
-                             model_type=model_type)
+    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
 else:
-    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor, use_popularity=True,
-                             model_type=model_type)
+    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor, model_type=model_type)
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
@@ -204,7 +202,8 @@ print(config.p_dims)
 model = MultiVAE(config.p_dims)
 model = model.to(device)
 
-criterion = rvae_rank_pair_loss(device=device, popularity=popularity if config.use_popularity else None,
+criterion = rvae_rank_pair_loss(device=device, popularity=popularity if model_type in (model_types.LOW, model_types.MED,
+                                                                model_types.HIGH) else None,
                                 scale=config.scale,
                                 thresholds=thresholds,
                                 frequencies=frequencies)

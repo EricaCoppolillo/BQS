@@ -2,6 +2,7 @@ import os
 import gc
 
 from tqdm import tqdm
+from math import ceil
 from scipy.sparse import csr_matrix
 from scipy.sparse import save_npz, load_npz
 from pathlib import Path
@@ -14,8 +15,7 @@ model_types = Config("./model_type_info.json")
 
 
 class DataLoader:
-    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100,
-                 use_popularity=False):
+    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100):
 
         dataset = load_dataset(file_tr)
 
@@ -32,17 +32,20 @@ class DataLoader:
         self.high_pop = len([i for i in self.item_popularity if self.thresholds[1] < i])
 
         self.n_items = len(self.item_popularity)
-        self.use_popularity = use_popularity
+        self.use_popularity = self.model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
+                                                  model_types.OVERSAMPLING)
         self.sorted_item_popularity = sorted(self.item_popularity)
         limit = 1
         self.max_popularity = self.sorted_item_popularity[-limit]
         self.min_popularity = self.sorted_item_popularity[0]
 
         self.decreasing_factor = decreasing_factor
-        gamma = self.pos_neg_ratio / decreasing_factor
-        # gamma = 1
-        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
-                            self.item_popularity]
+        n = self.pos_neg_ratio
+        self.frequencies = [n*ceil(self.max_popularity/(self.decreasing_factor*f_i)) for f_i in self.item_popularity]
+
+        print(f"min frequency: {min(self.frequencies)}")
+        print(f"max frequency: {max(self.frequencies)}")
+
 
         self.max_width = -1
 
@@ -430,7 +433,7 @@ class DataLoader:
 
 class EnsembleDataLoader:
     def __init__(self, data_dir, p_dims, seed, decreasing_factor, pos_neg_ratio=4, negatives_in_test=100,
-                 use_popularity=False, chunk_size=1000, device="cpu"):
+                  chunk_size=1000, device="cpu"):
 
         dataset_file = os.path.join(data_dir, 'data_rvae')
         dataset = load_dataset(dataset_file)
@@ -451,15 +454,14 @@ class EnsembleDataLoader:
         limit = 1
 
         self.n_items = len(self.item_popularity)
-        self.use_popularity = use_popularity
+        self.use_popularity = True
         self.sorted_item_popularity = sorted(self.item_popularity)
         self.max_popularity = self.sorted_item_popularity[-limit]
         self.min_popularity = self.sorted_item_popularity[0]
 
         self.decreasing_factor = decreasing_factor
-        gamma = self.pos_neg_ratio / decreasing_factor
-        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
-                            self.item_popularity]
+        n = self.pos_neg_ratio
+        self.frequencies = [n * ceil(self.max_popularity / (self.decreasing_factor * f_i)) for f_i in self.item_popularity]
 
         self.max_width = -1
 
