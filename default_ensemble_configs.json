@@ -140,7 +140,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
-    "ddecreasing_factor": 500,
+    "decreasing_factor": 500,
     "seed": 8734
   }
 }
