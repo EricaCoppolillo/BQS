@@ -27,6 +27,8 @@ copy_pasting_data = eval(config.copy_pasting_data)
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
+config.alpha = float(config.alpha)
+config.gamma = int(config.gamma)
 # ---------------------------------------------------
 
 # set seed for experiment reproducibility
@@ -68,7 +70,8 @@ to_pickle = True
 if model_type == model_types.BASELINE:
     trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
 else:
-    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor, model_type=model_type)
+    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
+                             model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
@@ -254,7 +257,7 @@ try:
             best_loss = result['loss']
         '''
         LOW, MED, HIGH = 0, 1, 2
-        if model_type == model_types.BASELINE:
+        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
             val_result = result["loss"]
         # in the following elif blocks, the value is multiplied by -1 to invert the objective (minimizing instead of
         # maximizing)

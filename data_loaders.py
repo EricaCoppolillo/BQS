@@ -15,7 +15,8 @@ model_types = Config("./model_type_info.json")
 
 
 class DataLoader:
-    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100):
+    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100, alpha=None,
+                        gamma=None):
 
         dataset = load_dataset(file_tr)
 
@@ -30,6 +31,16 @@ class DataLoader:
         self.low_pop = len([i for i in self.item_popularity if i <= self.thresholds[0]])
         self.med_pop = len([i for i in self.item_popularity if self.thresholds[0] < i <= self.thresholds[1]])
         self.high_pop = len([i for i in self.item_popularity if self.thresholds[1] < i])
+
+        # compute the Beta parameter according to the item popularity
+        if self.model_type == model_types.REWEIGHTING:
+            # Beta is defined as the average popularity of the medium-popular class of items
+            numpy_item_pop = np.array(self.item_popularity)
+            mid_pop_idxs = (self.thresholds[0] < numpy_item_pop) & (numpy_item_pop <= self.thresholds[1])
+            self.beta = np.mean(numpy_item_pop[mid_pop_idxs])
+            assert self.beta > 0, mid_pop_idxs
+            self.gamma = gamma
+            self.alpha = alpha
 
         self.n_items = len(self.item_popularity)
         self.use_popularity = self.model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
@@ -116,16 +127,41 @@ class DataLoader:
                     vals.append(elem[j])
             return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.int32)
 
-        def _creating_csr_mask(x, input_shape, desc):
-            rows = []
-            cols = []
-            vals = []
-            for i, elem in tqdm(enumerate(x), desc=desc):
-                for j in range(len(elem)):
-                    rows.append(i)
-                    cols.append(j)
-                    vals.append(1)
-            return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
+
+        if model_type == model_types.REWEIGHTING:
+            def _creating_csr_mask(x, input_shape, desc):
+                print("Currently using masks with reweighting")
+                rows = []
+                cols = []
+                vals = []
+                for i, elem in tqdm(enumerate(x), desc=desc):
+                    for j in range(len(elem)):
+                        rows.append(i)
+                        cols.append(j)
+                        # elem[j] è l'item ID dell'oggetto
+                        f_i = self.item_popularity[elem[j]]
+                        # assert (elem[j] >= 0) and (elem[j] < len(self.item_popularity)), elem[j]
+                        num = 1+np.exp(self.alpha*(f_i-self.beta-1))
+                        num = num**-1
+                        num *= self.gamma
+                        num += 1
+                        num /= (self.gamma +1)
+                        # assert num > 0
+                        vals.append(num)
+                        #num = self.gamma*((1 + np.exp(self.alpha*(f_i - self.beta - 1)))**-1) + 1
+                        #vals.append(num/(self.gamma + 1))
+                return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.float)
+        else:
+            def _creating_csr_mask(x, input_shape, desc):
+                rows = []
+                cols = []
+                vals = []
+                for i, elem in tqdm(enumerate(x), desc=desc):
+                    for j in range(len(elem)):
+                        rows.append(i)
+                        cols.append(j)
+                        vals.append(1)
+                return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
 
         # check if sparse matrices have already been computed
         dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type,
@@ -144,7 +180,7 @@ class DataLoader:
                 self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape,
                                                                  desc="Positive Items")
                 self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape,
-                                                                 desc="Positive Items")
+                                                                 desc="Negative Items")
                 self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], input_shape=shape, desc="Mask Items")
             # save matrices
             for tag in self.pos:

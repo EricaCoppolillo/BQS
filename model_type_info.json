@@ -4,5 +4,5 @@
   "MED": "medium",
   "HIGH": "high",
   "OVERSAMPLING": "oversampling",
-  "WEIGHTING": "weighting"
+  "REWEIGHTING": "reweighting"
 }

@@ -83,7 +83,15 @@ class rvae_rank_pair_loss(rvae_loss):
         self.device = device
 
     def log_p(self, x, y, pos_items, neg_items, mask, model_type):
-        weight = mask
+
+        # assert mask.sum() > 0
+        if model_type == model_types.REWEIGHTING:
+            weight = mask
+            # assert weight.sum() > 0
+            mask = mask > 0
+        else:
+            weight = mask
+
 
         y1 = torch.gather(y, 1, pos_items.long()) * mask
         y2 = torch.gather(y, 1, neg_items.long()) * mask
@@ -99,7 +107,8 @@ class rvae_rank_pair_loss(rvae_loss):
             pop_pos = self.popularity[pos_items.long()]
             filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
 
-        if model_type == model_types.BASELINE:
+        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
+            # assert mask.sum() > 0
             neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
         else:
             neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
