@@ -137,12 +137,15 @@ class DataLoader:
                 cols = []
                 vals = []
 
-                def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
-                    return (_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
-                                _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1)
+                if self.alpha is not None:
+                    def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
+                        return (_gamma+1)*((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
+                                            _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1))
 
-                w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
-                       for elem in self.absolute_item_popularity]
+                    w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
+                           for elem in self.absolute_item_popularity]
+                else:
+                    w_i = [1/elem for elem in self.absolute_item_popularity]
 
                 for i, elem in tqdm(enumerate(x), desc=desc):
                     for j in range(len(elem)):
