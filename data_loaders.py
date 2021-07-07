@@ -23,6 +23,9 @@ class DataLoader:
         self.n_users = dataset['users']
         self.item_popularity = dataset['popularity']
         self.thresholds = dataset['thresholds']
+        self.absolute_thresholds = list(map(lambda x:x*self.n_users, self.thresholds))
+        self.absolute_item_popularity = np.array(list(map(lambda x:x*self.n_users, self.item_popularity)))
+
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
         self.model_type = model_type
@@ -35,10 +38,9 @@ class DataLoader:
         # compute the Beta parameter according to the item popularity
         if self.model_type == model_types.REWEIGHTING:
             # Beta is defined as the average popularity of the medium-popular class of items
-            numpy_item_pop = np.array(self.item_popularity)
-            mid_pop_idxs = (self.thresholds[0] < numpy_item_pop) & (numpy_item_pop <= self.thresholds[1])
-            self.beta = np.mean(numpy_item_pop[mid_pop_idxs])
-            assert self.beta > 0, mid_pop_idxs
+            self.beta = self.absolute_item_popularity[(self.absolute_item_popularity >= self.absolute_thresholds[0]) &
+                                                 (self.absolute_item_popularity < self.absolute_thresholds[1])].mean()
+            assert self.beta > 0, self.absolute_thresholds
             self.gamma = gamma
             self.alpha = alpha
 
@@ -134,22 +136,20 @@ class DataLoader:
                 rows = []
                 cols = []
                 vals = []
+
+                def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
+                    return (_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
+                                _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1)
+
+                w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
+                       for elem in self.absolute_item_popularity]
+
                 for i, elem in tqdm(enumerate(x), desc=desc):
                     for j in range(len(elem)):
                         rows.append(i)
                         cols.append(j)
                         # elem[j] è l'item ID dell'oggetto
-                        f_i = self.item_popularity[elem[j]]
-                        # assert (elem[j] >= 0) and (elem[j] < len(self.item_popularity)), elem[j]
-                        num = 1+np.exp(self.alpha*(f_i-self.beta-1))
-                        num = num**-1
-                        num *= self.gamma
-                        num += 1
-                        num /= (self.gamma +1)
-                        # assert num > 0
-                        vals.append(num)
-                        #num = self.gamma*((1 + np.exp(self.alpha*(f_i - self.beta - 1)))**-1) + 1
-                        #vals.append(num/(self.gamma + 1))
+                        vals.append(w_i[elem[j]])
                 return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.float)
         else:
             def _creating_csr_mask(x, input_shape, desc):
