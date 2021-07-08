@@ -28,7 +28,7 @@ config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
 config.alpha = float(config.alpha)
-config.gamma = int(config.gamma)
+config.gamma = float(config.gamma)
 if config.alpha<0 or config.gamma < 0:
     config.alpha=None
     config.gamma=None
