@@ -1,12 +1,14 @@
 import os
 import gc
+import json
 
 from tqdm import tqdm
 from math import ceil
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, vstack
 from scipy.sparse import save_npz, load_npz
 from pathlib import Path
 import pickle
+import sqlite3
 from util import *
 from models import *
 from config import Config
@@ -468,6 +470,459 @@ class DataLoader:
                         self._count_positive_user[tag][i] += 1
 
         return self._count_positive_user[tag]
+
+
+class CachedDataLoader(DataLoader):
+    """
+    Version of data loader that use a sqlite cache to store data
+    """
+    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4,
+                 negatives_in_test=100, alpha=None, gamma=None, clean_cache=False):
+        """
+
+        :param clean_cache: if True rebuild cache from scratch
+        """
+        self.use_popularity = model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
+                                                  model_types.OVERSAMPLING)
+
+        cache_file = f'{file_tr}_{1 if self.use_popularity else 0}.db'
+
+        if clean_cache and os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        init_db = not os.path.exists(cache_file)
+
+        self.max_width = 0  # unused
+        self.pos_neg_ratio = pos_neg_ratio
+        self.negatives_in_test = negatives_in_test
+        self.model_type = model_type
+        self.size = {}
+
+        self._db = sqlite3.connect(cache_file)
+
+        if init_db:
+            dataset = load_dataset(file_tr)
+            self._init_cache(dataset, decreasing_factor, alpha, gamma)
+        else:
+            cur = self._db.cursor()
+
+            self._init_size_struct(cur)
+
+            cur.execute('SELECT data FROM config WHERE id = 1')
+            self.n_users, self.item_popularity, self.thresholds = json.loads(cur.fetchone()[0])
+            cur.close()
+
+            self.item_popularity = np.array(self.item_popularity)
+            self._init_item_struct(decreasing_factor, alpha, gamma)
+
+
+        print(f"min frequency: {min(self.frequencies)}")
+        print(f"max frequency: {max(self.frequencies)}")
+
+        print('DATASET STATS ------------------------------')
+        print('users:', self.n_users)
+        print('items:', self.n_items)
+        print('low_pop:', self.low_pop)
+        print('med_pop:', self.med_pop)
+        print('high_pop:', self.high_pop)
+        print('thresholds:', self.thresholds)
+        print('max_popularity:', self.max_popularity)
+        print('min_popularity:', self.min_popularity)
+        print('max_frequency:', max(self.frequencies))
+        print('min_frequency:', min(self.frequencies))
+        print('num(max_popularity):', sum(self.item_popularity == self.max_popularity))
+        print('num(min_popularity):', sum(self.item_popularity == self.min_popularity))
+        print('sorted(self.sorted_item_popularity)[:100]:', sorted(self.sorted_item_popularity[:10]))
+        print('sorted(self.sorted_item_popularity)[-100:]:', sorted(self.sorted_item_popularity[-10:]))
+        print('sorted(frequencies):', sorted(self.frequencies)[:10])
+
+        if model_type == model_types.REWEIGHTING:
+            def _creating_csr_mask(x, input_shape):
+                rows = []
+                cols = []
+                vals = []
+
+                if self.alpha is not None:
+                    def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
+                        return (_gamma+1)*((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
+                                _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1))
+
+                    w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
+                           for elem in self.absolute_item_popularity]
+                else:
+                    w_i = [1/elem for elem in self.absolute_item_popularity]
+
+                for i, elem in enumerate(x):
+                    for j in range(len(elem)):
+                        rows.append(i)
+                        cols.append(j)
+                        # elem[j] è l'item ID dell'oggetto
+                        vals.append(w_i[elem[j]])
+                return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.float)
+        else:
+            def _creating_csr_mask(x, input_shape):
+                rows = []
+                cols = []
+                vals = []
+                for i, elem in enumerate(x):
+                    for j in range(len(elem)):
+                        rows.append(i)
+                        cols.append(j)
+                        vals.append(1)
+                return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
+
+        self.creating_csr_mask = _creating_csr_mask
+
+        print('Done.')
+
+    def __del__(self):
+        self._db.close()
+
+    def _init_item_struct(self, decreasing_factor, alpha, gamma):
+        self.n_items = len(self.item_popularity)
+        self.absolute_thresholds = list(map(lambda x: x * self.n_users, self.thresholds))
+        self.absolute_item_popularity = np.array(list(map(lambda x: x * self.n_users, self.item_popularity)))
+
+        # IMPROVEMENT
+        self.low_pop = len([i for i in self.item_popularity if i <= self.thresholds[0]])
+        self.med_pop = len([i for i in self.item_popularity if self.thresholds[0] < i <= self.thresholds[1]])
+        self.high_pop = len([i for i in self.item_popularity if self.thresholds[1] < i])
+
+        # compute the Beta parameter according to the item popularity
+        if self.model_type == model_types.REWEIGHTING:
+            # Beta is defined as the average popularity of the medium-popular class of items
+            self.beta = self.absolute_item_popularity[(self.absolute_item_popularity >= self.absolute_thresholds[0]) &
+                                                      (self.absolute_item_popularity < self.absolute_thresholds[
+                                                          1])].mean()
+            assert self.beta > 0, self.absolute_thresholds
+            self.gamma = gamma
+            self.alpha = alpha
+
+        self.sorted_item_popularity = sorted(self.item_popularity)
+        limit = 1
+        self.max_popularity = self.sorted_item_popularity[-limit]
+        self.min_popularity = self.sorted_item_popularity[0]
+
+        self.decreasing_factor = decreasing_factor
+        n = self.pos_neg_ratio
+        self.frequencies = [n * ceil(self.max_popularity / (self.decreasing_factor * f_i)) for f_i in
+                            self.item_popularity]
+
+    def _create_vector(self, item_data, shape, dtype=np.int32):
+        """
+        Return a csr matrix 1xD where
+        :param item_data: is a list of integer, the id of the items
+        :param shape: number of the columns D
+        :param dtype:
+        """
+        cols = list(range(len(item_data)))
+        rows = [0] * len(item_data)
+        vals = item_data
+        items_np = csr_matrix((vals, (rows, cols)), shape=(1, shape), dtype=dtype)
+
+        return items_np
+
+    def _create_vector_one_hot(self, item_data, shape=None, dtype=np.int8):
+        """
+        Return a csr matrix 1xD where
+        :param item_data: is a list of integer, the id of the items
+        :param shape: number of the columns D
+        :param dtype:
+        """
+        if shape is None:
+            shape = self.n_items
+        vals = [1] * len(item_data)
+        rows = [0] * len(item_data)
+        cols = item_data
+        items_np = csr_matrix((vals, (rows, cols)), shape=(1, shape), dtype=dtype)
+
+        return items_np
+
+    def _load_data(self, dataset, cur):
+        batch = []
+
+        training_data = dataset['training_data']
+        validation_data = dataset['validation_data']
+        test_data = dataset['test_data']
+
+        print('LEN TEST:', len(test_data.keys()))
+
+        for i, user_id in enumerate(training_data):
+            if i % 1000 == 0:
+                print("{}/{}".format(i, len(training_data)))
+
+            pos, neg = training_data[user_id]
+            assert len(neg) >= 100, f'fail train neg for user {user_id}'
+
+            items_np = self._create_vector_one_hot(pos)
+            pos, neg = self._generate_pairs(pos)
+            pos = self._create_vector(pos, len(pos))
+            neg = self._create_vector(neg, len(neg))
+
+            batch.append((i+1,
+                          pickle.dumps(items_np),
+                          pickle.dumps(pos),
+                          pickle.dumps(neg)
+                          ))
+
+            if (i + 1) % 1000 == 0 or i + 1 == len(training_data):
+                cur.executemany('INSERT INTO training VALUES(?,?,?,?)', batch)
+                self._db.commit()
+                batch.clear()
+
+        # VALIDATION
+        assert len(batch) == 0
+        for i, user_id in enumerate(validation_data):
+            if i % 1000 == 0:
+                print("{}/{}".format(i, len(validation_data)))
+            positives_tr, positives_te, negatives_sampled = validation_data[user_id]
+            if len(positives_te) == 0:
+                continue
+
+            assert len(negatives_sampled) >= 100, f'fail valid neg for user {user_id}'
+
+            all_pos = positives_tr + positives_te
+            items_np = self._create_vector_one_hot(all_pos)
+
+            pos, neg = self._generate_pairs(positives_tr)
+            pos = self._create_vector(pos, len(pos))
+            neg = self._create_vector(neg, len(neg))
+
+            batch.append((i + 1,
+                          pickle.dumps(items_np),
+                          pickle.dumps(pos),
+                          pickle.dumps(neg),
+                          pickle.dumps(positives_te),  # simple list
+                          pickle.dumps(negatives_sampled)  # simple list
+                          ))
+
+            if (i + 1) % 1000 == 0 or i + 1 == len(validation_data):
+                cur.executemany('INSERT INTO validation VALUES(?,?,?,?,?,?)', batch)
+                self._db.commit()
+                batch.clear()
+
+        # TEST
+        assert len(batch) == 0
+        for i, user_id in enumerate(test_data):
+            if i % 1000 == 0:
+                print("{}/{}".format(i, len(test_data)))
+            positives_tr, positives_te, negatives_sampled = test_data[user_id]
+            if len(positives_te) == 0:
+                continue
+
+            assert len(negatives_sampled) >= 100, f'fail test neg for user {user_id}'
+
+            all_pos = positives_tr + positives_te
+            items_np = self._create_vector_one_hot(all_pos)
+
+            pos, neg = self._generate_pairs(positives_tr)
+            pos = self._create_vector(pos, len(pos))
+            neg = self._create_vector(neg, len(neg))
+
+            batch.append((i + 1,
+                          pickle.dumps(items_np),
+                          pickle.dumps(pos),
+                          pickle.dumps(neg),
+                          pickle.dumps(positives_te),  # simple list
+                          pickle.dumps(negatives_sampled)  # simple list
+                          ))
+
+            if (i + 1) % 1000 == 0 or i + 1 == len(validation_data):
+                cur.executemany('INSERT INTO testset VALUES(?,?,?,?,?,?)', batch)
+                self._db.commit()
+                batch.clear()
+
+    def _init_cache(self, dataset, decreasing_factor, alpha, gamma):
+        cur = self._db.cursor()
+
+        ### TABLE
+        # the id are 1-based
+        cur.executescript('''
+CREATE TABLE config (
+  "id" integer NOT NULL,
+  "data" TEXT,
+  PRIMARY KEY ("id")
+);
+CREATE TABLE training (
+  "id" integer NOT NULL,
+  "data_x" blob,
+  "data_pos" blob,
+  "data_neg" blob,
+  PRIMARY KEY ("id")
+);
+CREATE TABLE validation (
+  "id" integer NOT NULL,
+  "data_x" blob,
+  "data_pos" blob,
+  "data_neg" blob,
+  "data_pos_te" blob,
+  "data_neg_te" blob,
+  PRIMARY KEY ("id")
+);
+CREATE TABLE testset (
+  "id" integer NOT NULL,
+  "data_x" blob,
+  "data_pos" blob,
+  "data_neg" blob,
+  "data_pos_te" blob,
+  "data_neg_te" blob,
+  PRIMARY KEY ("id")
+);
+        ''')
+
+        self._db.commit()
+
+        ### DATA
+        n_users = dataset['users']
+        item_popularity = dataset['popularity']
+        thresholds = dataset['thresholds']
+        self.n_items = len(item_popularity)
+
+        self.n_users, self.item_popularity, self.thresholds = n_users, item_popularity, thresholds
+
+        cur.execute('INSERT INTO config VALUES (?, ?)',
+                    (1, json.dumps((n_users, item_popularity, thresholds))))
+        self._db.commit()
+
+        self._init_item_struct(decreasing_factor, alpha, gamma)
+
+        # pre process data
+        self._load_data(dataset, cur)
+        self._init_size_struct(cur)
+
+        # CLOSE
+        cur.close()
+
+    def _generate_mask_te(self, pos_rank):
+        """
+        Generate a 1-based mask with shape len(pos_rank) x n_items
+
+        :return: numpy array
+        """
+        mask_rank = np.zeros((len(pos_rank), self.n_items), dtype=np.int8)
+
+        for i, pos in enumerate(pos_rank):
+            mask_rank[i, pos] = 1
+
+        return mask_rank
+
+    def iter(self, batch_size=256, tag='train'):
+        """
+        Iter on data
+
+        :param batch_size: size of the batch
+        :return: batch_idx, x, pos, neg, mask_pos, mask_neg
+        """
+
+        assert (tag in ('train', 'validation', 'test'))
+
+        tablename = 'validation'
+        if tag == 'train':
+            tablename = 'training'
+        elif tag == 'test':
+            tablename = 'testset'
+
+        cur = self._db.cursor()
+        n_users = cur.execute(f'SELECT COUNT(*) AS cnt FROM {tablename}').fetchone()[0]
+
+        idxlist = np.arange(1, n_users + 1)
+        np.random.shuffle(idxlist)
+        N = idxlist.shape[0]
+        for start_idx in range(0, N, batch_size):
+            end_idx = min(start_idx + batch_size, N)
+            raw_idxs = idxlist[start_idx:end_idx]
+
+            x = []
+            pos = []
+            neg = []
+            mask = []
+
+            max_column = 0
+            id_params = ",".join([str(i) for i in raw_idxs])
+            for row in cur.execute(f'SELECT * FROM {tablename} WHERE id IN ({id_params})'):
+                x.append(pickle.loads(row[1]))
+                pos.append(pickle.loads(row[2]))
+                neg.append(pickle.loads(row[3]))
+                mask.append(pos[-1].data)
+
+                max_column = max(max_column, pos[-1].shape[1])
+
+            for m1, m2 in zip(pos, neg):
+                m1.resize(1, max_column)
+                m2.resize(1, max_column)
+
+            assert len(x) > 0
+            x = vstack(x).A
+            mask = self.creating_csr_mask(mask, (x.shape[0], max_column)).A
+            pos = vstack(pos).A
+            neg = vstack(neg).A
+            yield x, pos, neg, mask
+
+        cur.close()
+
+    def iter_test(self, batch_size=256, tag='test'):
+        """
+        Iter on data
+
+        mask_loss
+
+        :param batch_size: size of the batch
+        :return: batch_idx, x, pos, neg, mask_pos, mask_neg
+        """
+
+        assert (tag in ('validation', 'test'))
+
+        tablename = 'validation' if tag != 'test' else 'testset'
+
+        cur = self._db.cursor()
+        n_users = cur.execute(f'SELECT COUNT(*) AS cnt FROM {tablename}').fetchone()[0]
+
+        idxlist = np.arange(1, n_users + 1)
+        N = idxlist.shape[0]
+
+        for start_idx in range(0, N, batch_size):
+            end_idx = min(start_idx + batch_size, N)
+            raw_idxs = idxlist[start_idx:end_idx]
+
+            x = []
+            pos = []
+            neg = []
+            mask = []
+            pos_te = []
+            neg_te = []
+
+            max_column = 0
+            id_params = ",".join([str(i) for i in raw_idxs])
+            for row in cur.execute(f'SELECT * FROM {tablename} WHERE id IN ({id_params})'):
+                x.append(pickle.loads(row[1]))
+                pos.append(pickle.loads(row[2]))
+                neg.append(pickle.loads(row[3]))
+                mask.append(pos[-1].data)
+                pos_te.append(pickle.loads(row[4]))
+                neg_te.append(pickle.loads(row[5]))
+
+                max_column = max(max_column, pos[-1].shape[1])
+
+            for m1, m2 in zip(pos, neg):
+                m1.resize(1, max_column)
+                m2.resize(1, max_column)
+
+            assert len(x) > 0
+            x = vstack(x).A
+            pos = vstack(pos).A
+            neg = vstack(neg).A
+            mask = self.creating_csr_mask(mask, (x.shape[0], max_column)).A
+            # pos_te is list
+            # neg_te is list
+            mask_te = self._generate_mask_te(pos_te)
+
+            yield x, pos, neg, mask, pos_te, neg_te, mask_te
+
+        cur.close()
+
+    def _init_size_struct(self, cur):
+        for name, tablename in (('train', 'training'), ('validation', 'validation'), ('test', 'testset')):
+            self.size[name] = cur.execute(f'SELECT COUNT(*) AS cnt FROM {tablename}').fetchone()[0]
 
 
 class EnsembleDataLoader:

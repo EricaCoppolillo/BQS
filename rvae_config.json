@@ -1,13 +1,11 @@
 {
-  "CUDA_VISIBLE_DEVICES": "1",
-    "dataset_name": "datasets.MOVIELENS_20M",
-    "model_type": "model_types.REWEIGHTING",
+  "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.EPINIONS",
+    "model_type": "model_types.LOW",
     "copy_pasting_data": "True",
 
-    "alpha": 0.0025,
-    "gamma": 10,
     "n_epochs": 50,
-    "batch_size": 1024,
+    "batch_size": 256,
     "weight_decay": 0.0,
     "learning_rate": 3e-4,
     "total_anneal_steps":200000,
@@ -25,5 +23,6 @@
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
     "best_model_k_metric": 10,
-    "seed": 8734
+    "cached_dataloader": "True",
+    "seed": 12121995
 }

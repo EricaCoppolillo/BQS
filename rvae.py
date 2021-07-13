@@ -11,7 +11,7 @@ from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from models import MultiVAE
 from loss_func import rvae_rank_pair_loss
-from data_loaders import DataLoader
+from data_loaders import DataLoader, CachedDataLoader
 from config import Config
 
 datasets = Config("./datasets_info.json")
@@ -20,15 +20,17 @@ model_types = Config("./model_type_info.json")
 # SETTINGS ------------------------------------------
 config = Config("./rvae_config.json")
 
-os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
 dataset_name = eval(config.dataset_name)
 model_type = eval(config.model_type)
 copy_pasting_data = eval(config.copy_pasting_data)
+config.cached_dataloader = eval(config.cached_dataloader if 'cached_dataloader' in config else 'False')
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
-config.alpha = float(config.alpha)
-config.gamma = float(config.gamma)
+config.alpha = float(config.get('alpha', -1))
+config.gamma = float(config.get('gamma', -1))
 if config.alpha<0 or config.gamma < 0:
     config.alpha=None
     config.gamma=None
@@ -61,7 +63,7 @@ if not os.path.exists(result_dir):
 run_time = datetime.today().strftime('%Y%m%d_%H%M')
 run_dir = os.path.join(result_dir, f'{model_type}_{run_time}')
 
-os.mkdir(run_dir)
+os.makedirs(run_dir, exist_ok=True)
 
 # TODO: include learning params
 file_model = os.path.join(run_dir, 'best_model.pth')
@@ -70,11 +72,19 @@ to_pickle = True
 
 """ Train and test"""
 
-if model_type == model_types.BASELINE:
-    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
+if not config.cached_dataloader:
+    if model_type == model_types.BASELINE:
+        trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
+    else:
+        trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                 model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 else:
-    trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
-                             model_type=model_type, alpha=config.alpha, gamma=config.gamma)
+    print('USE CACHED DATALOADER')
+    if model_type == model_types.BASELINE:
+        trainloader = CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
+    else:
+        trainloader = CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                 model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
