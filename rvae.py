@@ -7,6 +7,7 @@ import time
 import torch
 import numpy as np
 import json
+import pickle
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from models import MultiVAE
@@ -22,6 +23,7 @@ config = Config("./rvae_config.json")
 
 if 'CUDA_VISIBLE_DEVICES' not in os.environ:
     os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
+
 dataset_name = eval(config.dataset_name)
 model_type = eval(config.model_type)
 copy_pasting_data = eval(config.copy_pasting_data)
@@ -85,6 +87,11 @@ else:
     else:
         trainloader = CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma)
+
+# test purposes
+with open(f'./{dataset_name}.pickle', 'wb') as handle:
+    pickle.dump(trainloader.item_visibility, handle, protocol=pickle.HIGHEST_PROTOCOL)
+sys.exit(-1)
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)

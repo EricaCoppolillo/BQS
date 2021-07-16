@@ -1,13 +1,13 @@
 {
-  "CUDA_VISIBLE_DEVICES": "2",
-    "dataset_name": "datasets.EPINIONS",
-    "model_type": "model_types.LOW",
+  "CUDA_VISIBLE_DEVICES": "3",
+    "dataset_name": "datasets.CITEULIKE",
+    "model_type": "model_types.OVERSAMPLING",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
     "batch_size": 256,
     "weight_decay": 0.0,
-    "learning_rate": 3e-4,
+    "learning_rate": 1e-3,
     "total_anneal_steps":200000,
     "anneal_cap":0.2,
     "sample_mask":100,
@@ -23,6 +23,6 @@
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
     "best_model_k_metric": 10,
-    "cached_dataloader": "True",
+    "cached_dataloader": "False",
     "seed": 12121995
 }

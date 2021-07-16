@@ -57,6 +57,7 @@ class DataLoader:
         self.decreasing_factor = decreasing_factor
         n = self.pos_neg_ratio
         self.frequencies = [n*ceil(self.max_popularity/(self.decreasing_factor*f_i)) for f_i in self.item_popularity]
+        self.item_visibility = {i:0 for i in range(len(self.item_popularity))}
 
         print(f"min frequency: {min(self.frequencies)}")
         print(f"max frequency: {max(self.frequencies)}")
@@ -358,6 +359,7 @@ class DataLoader:
                 frequency = self.frequencies[item]
             else:
                 frequency = self.pos_neg_ratio
+            self.item_visibility[item] += frequency
             positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
 
         negatives = self._sample_negatives(pos, len(positives))
