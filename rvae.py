@@ -94,7 +94,7 @@ n_items = trainloader.n_items
 config.p_dims.append(n_items)
 popularity = trainloader.item_popularity
 thresholds = trainloader.thresholds
-frequencies = trainloader.frequencies
+frequencies = trainloader.frequencies_dict["training"]
 
 max_y_aux_popularity = compute_max_y_aux_popularity(config)
 

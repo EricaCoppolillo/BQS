@@ -2,7 +2,7 @@
   "MOVIELENS_1M": {
     "CUDA_VISIBLE_DEVICES": "2",
     "dataset_name": "datasets.MOVIELENS_1M",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.LOW",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
@@ -24,7 +24,7 @@
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
     "best_model_k_metric": 10,
-    "cached_dataloader": "True",
+    "cached_dataloader": "False",
     "seed": 12121995
   },
 
@@ -60,7 +60,7 @@
   "CITEULIKE": {
     "CUDA_VISIBLE_DEVICES": "2",
     "dataset_name": "datasets.CITEULIKE",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.LOW",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
@@ -82,14 +82,14 @@
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
     "best_model_k_metric": 10,
-    "cached_dataloader": "True",
+    "cached_dataloader": "False",
     "seed": 12121995
   },
 
   "PINTEREST": {
     "CUDA_VISIBLE_DEVICES": "2",
     "dataset_name": "datasets.PINTEREST",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.LOW",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
@@ -111,7 +111,7 @@
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
     "best_model_k_metric": 10,
-    "cached_dataloader": "True",
+    "cached_dataloader": "False",
     "seed": 12121995
   },
 
