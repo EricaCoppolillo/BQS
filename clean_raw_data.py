@@ -19,7 +19,7 @@ for idx in range(len(datasets)):
         for item_id in data["training_data"][key][0]:
             train_popularity[item_id] += 1
     # normalization
-    popularity_dict["train"] = [elem / len(data["training_data"]) for elem in train_popularity]
+    popularity_dict["training"] = [elem / len(data["training_data"]) for elem in train_popularity]
 
     val_popularity = [0] * len(f)
     for key in tqdm(data["validation_data"]):
@@ -33,7 +33,7 @@ for idx in range(len(datasets)):
         for item_id in data["test_data"][key][0]:
             test_popularity[item_id] += 1
     # normalization
-    popularity_dict["test"] = [elem / len(data["training_data"]) for elem in test_popularity]
+    popularity_dict["test"] = [elem / len(data["test_data"]) for elem in test_popularity]
     data["popularity_dict"] = popularity_dict
 
     with open(os.path.join(data_dir, datasets[idx], "data_rvae.pickle"), 'wb') as handle:

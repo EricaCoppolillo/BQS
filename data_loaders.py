@@ -24,18 +24,12 @@ class DataLoader:
 
         self.n_users = dataset['users']
         self.item_popularity = dataset['popularity']
-        train_popularity = [0] * len(self.item_popularity)
-        for key in tqdm(dataset["training_data"]):
-            for item_id in dataset["training_data"][key][0]:
-                train_popularity[item_id] += 1
-        self.absolute_item_popularity = np.array(train_popularity)
-        # normalization
-        train_popularity = [elem / len(dataset["training_data"]) for elem in train_popularity]
-        self.item_popularity=np.array(train_popularity)
+        self.item_popularity_dict = dataset['popularity_dict']
+        self.n_users_dict = {"training": len(dataset["training_data"]), "validation": len(dataset["validation_data"]),
+                             "test": len(dataset["test_data"])}
 
         self.thresholds = dataset['thresholds']
         self.absolute_thresholds = list(map(lambda x:x*self.n_users, self.thresholds))
-        #self.absolute_item_popularity = np.array(list(map(lambda x:x*self.n_users, self.item_popularity)))
 
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
@@ -65,42 +59,39 @@ class DataLoader:
 
         self.decreasing_factor = decreasing_factor
         n = self.pos_neg_ratio
-        self.frequencies = []
-        self.freq_decimal_part = []
-        for idx in range(len(self.item_popularity)):
-            f_i = self.item_popularity[idx]
-            n_i_decimal, n_int = modf(n * (self.max_popularity / (self.decreasing_factor * f_i)))
-            self.frequencies.append(int(n_int))
-            self.freq_decimal_part.append(n_i_decimal)
-        self.counter_for_decimal_part = [int(int(self.item_popularity[idx]*len(dataset["training_data"]))*self.freq_decimal_part[idx]) for idx in range(len(self.item_popularity))] # K_i
+        self.frequencies_dict = {}
+        self.freq_decimal_part_dict = {}
+        self.counter_for_decimal_part_dict = {}
+        self.slots_available_for_decimal_part_dict = {}
+        for split_type in ["training", "validation", "test"]:
+            frequencies = []
+            freq_decimal_part = []
+            item_popularity = self.item_popularity_dict[split_type]
+            max_popularity = max(item_popularity)
+            nusers = self.n_users_dict[split_type]
+            for idx in range(len(item_popularity)):
+                f_i = item_popularity[idx]
+                if f_i > 0:
+                    n_i_decimal, n_int = modf(n * (max_popularity / (self.decreasing_factor * f_i)))
+                    frequencies.append(int(n_int))
+                    freq_decimal_part.append(n_i_decimal)
+                else:
+                    frequencies.append(0)
+                    freq_decimal_part.append(0)
+            counter_for_decimal_part = [int(int(item_popularity[idx]*nusers)*freq_decimal_part[idx]) for idx in range(len(item_popularity))] # K_i
+            slots_available_for_decimal_part = [int(f_i*nusers) for f_i in item_popularity] # K
 
-        self.slots_available_for_decimal_part = [int(f_i**len(dataset["training_data"])) for f_i in self.item_popularity] # K
+            self.frequencies_dict[split_type] = frequencies
+            self.freq_decimal_part_dict[split_type] = freq_decimal_part
+            self.counter_for_decimal_part_dict[split_type] = counter_for_decimal_part
+            self.slots_available_for_decimal_part_dict[split_type] = slots_available_for_decimal_part
 
-
-        self.item_visibility = [0]*len(self.item_popularity)
-
-        print(f"min frequency: {min(self.frequencies)}")
-        print(f"max frequency: {max(self.frequencies)}")
+        self.item_visibility_dict = {split_type: [0]*len(self.item_popularity_dict[split_type])
+                                for split_type in ["training", "validation", "test"]}
 
 
         self.max_width = -1
 
-        print('DATASET STATS ------------------------------')
-        print('users:', self.n_users)
-        print('items:', self.n_items)
-        print('low_pop:', self.low_pop)
-        print('med_pop:', self.med_pop)
-        print('high_pop:', self.high_pop)
-        print('thresholds:', self.thresholds)
-        print('max_popularity:', self.max_popularity)
-        print('min_popularity:', self.min_popularity)
-        print('max_frequency:', max(self.frequencies))
-        print('min_frequency:', min(self.frequencies))
-        print('num(max_popularity):', sum(self.item_popularity == self.max_popularity))
-        print('num(min_popularity):', sum(self.item_popularity == self.min_popularity))
-        print('sorted(self.sorted_item_popularity)[:100]:', sorted(self.sorted_item_popularity[:10]))
-        print('sorted(self.sorted_item_popularity)[-100:]:', sorted(self.sorted_item_popularity[-10:]))
-        print('sorted(frequencies):', sorted(self.frequencies)[:10])
 
         print('phase 1: Loading data...')
         self._initialize()
@@ -280,7 +271,7 @@ class DataLoader:
             items_np = np.zeros(self.n_items, dtype=np.int8)
             items_np[pos] = 1
 
-            pos, neg = self._generate_pairs(pos, tag="t")
+            pos, neg = self._generate_pairs(pos, tag="training")
 
             train.append(items_np)
             self.pos['train'].append(pos)
@@ -305,7 +296,7 @@ class DataLoader:
             items_np[positives_tr] = 1
             items_np[positives_te] = 1
 
-            pos, neg = self._generate_pairs(positives_tr)
+            pos, neg = self._generate_pairs(positives_tr, tag="validation")
 
             validation.append(items_np)
 
@@ -333,7 +324,7 @@ class DataLoader:
             items_np[positives_tr] = 1
             items_np[positives_te] = 1
 
-            pos, neg = self._generate_pairs(positives_tr)
+            pos, neg = self._generate_pairs(positives_tr, tag="test")
 
             test.append(items_np)
 
@@ -376,16 +367,16 @@ class DataLoader:
         positives = []
         for item in pos:
             if self.use_popularity:
-                frequency = self.frequencies[item]
+                frequency = self.frequencies_dict[tag][item]
             else:
                 frequency = self.pos_neg_ratio
-            if self.counter_for_decimal_part[item] > 0:
-                if self.slots_available_for_decimal_part[item]-self.counter_for_decimal_part[item]<=0 or random.random() < self.freq_decimal_part[item]:
+            if self.counter_for_decimal_part_dict[tag][item] > 0:
+                if self.slots_available_for_decimal_part_dict[tag][item]-self.counter_for_decimal_part_dict[tag][item]<=0 or random.random() < self.freq_decimal_part_dict[tag][item]:
                     frequency += 1
-                    self.counter_for_decimal_part[item] -= 1
-                self.slots_available_for_decimal_part[item] -= 1
-            if tag=="t":
-                self.item_visibility[item] += frequency
+                    self.counter_for_decimal_part_dict[tag][item] -= 1
+                self.slots_available_for_decimal_part_dict[tag][item] -= 1
+
+            self.item_visibility_dict[tag][item] += frequency
             positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
 
         negatives = self._sample_negatives(pos, len(positives))

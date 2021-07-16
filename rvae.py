@@ -88,10 +88,7 @@ else:
         trainloader = CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 
-# test purposes
-with open(f'./{dataset_name}.pickle', 'wb') as handle:
-    pickle.dump(trainloader.item_visibility, handle, protocol=pickle.HIGHEST_PROTOCOL)
-sys.exit(-1)
+
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
