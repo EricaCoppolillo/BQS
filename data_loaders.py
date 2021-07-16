@@ -3,7 +3,7 @@ import gc
 import json
 
 from tqdm import tqdm
-from math import ceil
+from math import ceil, modf
 from scipy.sparse import csr_matrix, vstack
 from scipy.sparse import save_npz, load_npz
 from pathlib import Path
@@ -24,9 +24,18 @@ class DataLoader:
 
         self.n_users = dataset['users']
         self.item_popularity = dataset['popularity']
+        train_popularity = [0] * len(self.item_popularity)
+        for key in tqdm(dataset["training_data"]):
+            for item_id in dataset["training_data"][key][0]:
+                train_popularity[item_id] += 1
+        self.absolute_item_popularity = np.array(train_popularity)
+        # normalization
+        train_popularity = [elem / len(dataset["training_data"]) for elem in train_popularity]
+        self.item_popularity=np.array(train_popularity)
+
         self.thresholds = dataset['thresholds']
         self.absolute_thresholds = list(map(lambda x:x*self.n_users, self.thresholds))
-        self.absolute_item_popularity = np.array(list(map(lambda x:x*self.n_users, self.item_popularity)))
+        #self.absolute_item_popularity = np.array(list(map(lambda x:x*self.n_users, self.item_popularity)))
 
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
@@ -56,8 +65,19 @@ class DataLoader:
 
         self.decreasing_factor = decreasing_factor
         n = self.pos_neg_ratio
-        self.frequencies = [n*ceil(self.max_popularity/(self.decreasing_factor*f_i)) for f_i in self.item_popularity]
-        self.item_visibility = {i:0 for i in range(len(self.item_popularity))}
+        self.frequencies = []
+        self.freq_decimal_part = []
+        for idx in range(len(self.item_popularity)):
+            f_i = self.item_popularity[idx]
+            n_i_decimal, n_int = modf(n * (self.max_popularity / (self.decreasing_factor * f_i)))
+            self.frequencies.append(int(n_int))
+            self.freq_decimal_part.append(n_i_decimal)
+        self.counter_for_decimal_part = [int(int(self.item_popularity[idx]*len(dataset["training_data"]))*self.freq_decimal_part[idx]) for idx in range(len(self.item_popularity))] # K_i
+
+        self.slots_available_for_decimal_part = [int(f_i**len(dataset["training_data"])) for f_i in self.item_popularity] # K
+
+
+        self.item_visibility = [0]*len(self.item_popularity)
 
         print(f"min frequency: {min(self.frequencies)}")
         print(f"max frequency: {max(self.frequencies)}")
@@ -260,7 +280,7 @@ class DataLoader:
             items_np = np.zeros(self.n_items, dtype=np.int8)
             items_np[pos] = 1
 
-            pos, neg = self._generate_pairs(pos)
+            pos, neg = self._generate_pairs(pos, tag="t")
 
             train.append(items_np)
             self.pos['train'].append(pos)
@@ -351,7 +371,7 @@ class DataLoader:
 
         return random.choices(all_negatives, k=size)
 
-    def _generate_pairs(self, pos):
+    def _generate_pairs(self, pos, tag=""):
         # IMPROVEMENT
         positives = []
         for item in pos:
@@ -359,7 +379,13 @@ class DataLoader:
                 frequency = self.frequencies[item]
             else:
                 frequency = self.pos_neg_ratio
-            self.item_visibility[item] += frequency
+            if self.counter_for_decimal_part[item] > 0:
+                if self.slots_available_for_decimal_part[item]-self.counter_for_decimal_part[item]<=0 or random.random() < self.freq_decimal_part[item]:
+                    frequency += 1
+                    self.counter_for_decimal_part[item] -= 1
+                self.slots_available_for_decimal_part[item] -= 1
+            if tag=="t":
+                self.item_visibility[item] += frequency
             positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
 
         negatives = self._sample_negatives(pos, len(positives))
