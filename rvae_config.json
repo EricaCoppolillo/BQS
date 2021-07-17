@@ -1,7 +1,7 @@
 {
-  "CUDA_VISIBLE_DEVICES": "3",
-    "dataset_name": "datasets.CITEULIKE",
-    "model_type": "model_types.LOW",
+  "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.PINTEREST",
+    "model_type": "model_types.OVERSAMPLING",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,

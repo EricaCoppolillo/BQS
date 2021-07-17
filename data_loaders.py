@@ -528,7 +528,7 @@ class CachedDataLoader(DataLoader):
             self._init_size_struct(cur)
 
             cur.execute('SELECT data FROM config WHERE id = 1')
-            self.n_users, self.item_popularity, self.thresholds = json.loads(cur.fetchone()[0])
+            self.n_users, self.item_popularity, self.thresholds, self.item_popularity_dict, self.n_users_dict = json.loads(cur.fetchone()[0])
             cur.close()
 
             self.item_popularity = np.array(self.item_popularity)
@@ -624,8 +624,37 @@ class CachedDataLoader(DataLoader):
 
         self.decreasing_factor = decreasing_factor
         n = self.pos_neg_ratio
-        self.frequencies = [n * ceil(self.max_popularity / (self.decreasing_factor * f_i)) for f_i in
-                            self.item_popularity]
+        self.frequencies_dict = {}
+        self.freq_decimal_part_dict = {}
+        self.counter_for_decimal_part_dict = {}
+        self.slots_available_for_decimal_part_dict = {}
+        for split_type in ["training", "validation", "test"]:
+            frequencies = []
+            freq_decimal_part = []
+            item_popularity = self.item_popularity_dict[split_type]
+            max_popularity = max(item_popularity)
+            nusers = self.n_users_dict[split_type]
+            for idx in range(len(item_popularity)):
+                f_i = item_popularity[idx]
+                if f_i > 0:
+                    n_i_decimal, n_int = modf(n * (max_popularity / (self.decreasing_factor * f_i)))
+                    frequencies.append(int(n_int))
+                    freq_decimal_part.append(n_i_decimal)
+                else:
+                    frequencies.append(0)
+                    freq_decimal_part.append(0)
+            counter_for_decimal_part = [int(int(item_popularity[idx] * nusers) * freq_decimal_part[idx]) for idx in
+                                        range(len(item_popularity))]  # K_i
+            slots_available_for_decimal_part = [int(f_i * nusers) for f_i in item_popularity]  # K
+
+            self.frequencies_dict[split_type] = frequencies
+            self.freq_decimal_part_dict[split_type] = freq_decimal_part
+            self.counter_for_decimal_part_dict[split_type] = counter_for_decimal_part
+            self.slots_available_for_decimal_part_dict[split_type] = slots_available_for_decimal_part
+
+        self.item_visibility_dict = {split_type: [0] * len(self.item_popularity_dict[split_type])
+                                     for split_type in ["training", "validation", "test"]}
+
 
     def _create_vector(self, item_data, shape, dtype=np.int32):
         """
@@ -674,7 +703,7 @@ class CachedDataLoader(DataLoader):
             assert len(neg) >= 100, f'fail train neg for user {user_id}'
 
             items_np = self._create_vector_one_hot(pos)
-            pos, neg = self._generate_pairs(pos)
+            pos, neg = self._generate_pairs(pos, tag="training")
             pos = self._create_vector(pos, len(pos))
             neg = self._create_vector(neg, len(neg))
 
@@ -703,7 +732,7 @@ class CachedDataLoader(DataLoader):
             all_pos = positives_tr + positives_te
             items_np = self._create_vector_one_hot(all_pos)
 
-            pos, neg = self._generate_pairs(positives_tr)
+            pos, neg = self._generate_pairs(positives_tr, tag="validation")
             pos = self._create_vector(pos, len(pos))
             neg = self._create_vector(neg, len(neg))
 
@@ -734,7 +763,7 @@ class CachedDataLoader(DataLoader):
             all_pos = positives_tr + positives_te
             items_np = self._create_vector_one_hot(all_pos)
 
-            pos, neg = self._generate_pairs(positives_tr)
+            pos, neg = self._generate_pairs(positives_tr, tag="test")
             pos = self._create_vector(pos, len(pos))
             neg = self._create_vector(neg, len(neg))
 
@@ -795,12 +824,19 @@ CREATE TABLE testset (
         n_users = dataset['users']
         item_popularity = dataset['popularity']
         thresholds = dataset['thresholds']
+        item_popularity_dict = dataset['popularity_dict']
+        n_users_dict = {"training": len(dataset["training_data"]), "validation": len(dataset["validation_data"]),
+                             "test": len(dataset["test_data"])}
+
+        self.item_popularity_dict = item_popularity_dict
+        self.n_users_dict = n_users_dict
+
         self.n_items = len(item_popularity)
 
         self.n_users, self.item_popularity, self.thresholds = n_users, item_popularity, thresholds
 
         cur.execute('INSERT INTO config VALUES (?, ?)',
-                    (1, json.dumps((n_users, item_popularity, thresholds))))
+                    (1, json.dumps((n_users, item_popularity, thresholds, item_popularity_dict, n_users_dict))))
         self._db.commit()
 
         self._init_item_struct(decreasing_factor, alpha, gamma)
