@@ -3,6 +3,8 @@ from tqdm import tqdm
 import os
 import pickle
 
+DEBUG = True
+
 base_dir = "./"
 data_dir = os.path.join(base_dir, "data")
 datasets = [elem for elem in os.listdir(data_dir) if not elem.startswith(".")]
@@ -10,7 +12,21 @@ print(datasets)
 
 for idx in range(len(datasets)):
     print(f"Currently analyzing: {datasets[idx]}")
-    with open(os.path.join(data_dir, datasets[idx], "old_data_rvae.pickle"), "rb") as f:
+    oldversion=os.path.join(data_dir, datasets[idx], "old_data_rvae.pickle")
+
+    if not os.path.exists(os.path.join(data_dir, datasets[idx], "data_rvae.pickle")):
+       print('DATASET NOT VALID', os.path.join(data_dir, datasets[idx], "data_rvae.pickle"))
+       continue
+
+    if DEBUG:
+        print('PROCESS', oldversion)
+        continue
+
+    if not os.path.exists(oldversion):
+        print('rename old version')
+        os.rename(os.path.join(data_dir, datasets[idx], "data_rvae.pickle"), oldversion)
+
+    with open(oldversion, "rb") as f:
         data = pickle.load(f)
     f = data["popularity"]
     popularity_dict = {}
