@@ -1,8 +1,8 @@
 {
   "MOVIELENS_1M": {
-    "CUDA_VISIBLE_DEVICES": "2",
+    "CUDA_VISIBLE_DEVICES": "1",
     "dataset_name": "datasets.MOVIELENS_1M",
-    "model_type": "model_types.LOW",
+    "model_type": "model_types.OVERSAMPLING",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
@@ -29,13 +29,13 @@
   },
 
   "MOVIELENS_20M": {
-    "CUDA_VISIBLE_DEVICES": "2",
+    "CUDA_VISIBLE_DEVICES": "1",
     "dataset_name": "datasets.MOVIELENS_20M",
     "model_type": "model_types.OVERSAMPLING",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
-    "batch_size": 64,
+    "batch_size": 1024,
     "weight_decay": 0.0,
     "learning_rate": 3e-4,
     "total_anneal_steps":200000,
@@ -60,7 +60,7 @@
   "CITEULIKE": {
     "CUDA_VISIBLE_DEVICES": "2",
     "dataset_name": "datasets.CITEULIKE",
-    "model_type": "model_types.LOW",
+    "model_type": "model_types.OVERSAMPLING",
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
@@ -89,8 +89,8 @@
   "PINTEREST": {
     "CUDA_VISIBLE_DEVICES": "2",
     "dataset_name": "datasets.PINTEREST",
-    "model_type": "model_types.LOW",
-    "copy_pasting_data": "True",
+    "model_type": "model_types.OVERSAMPLING",
+    "copy_pasting_data": "False",
 
     "n_epochs": 50,
     "batch_size": 1024,
@@ -122,7 +122,7 @@
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
-    "batch_size": 256,
+    "batch_size": 1024,
     "weight_decay": 0.0,
     "learning_rate": 3e-4,
     "total_anneal_steps":200000,
@@ -151,7 +151,7 @@
     "copy_pasting_data": "True",
 
     "n_epochs": 50,
-    "batch_size": 128,
+    "batch_size": 256,
     "weight_decay": 0.0,
     "learning_rate": 3e-4,
     "total_anneal_steps":200000,

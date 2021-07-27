@@ -25,23 +25,28 @@ class DataLoader:
         self.n_users = dataset['users']
         self.item_popularity = dataset['popularity']
         self.item_popularity_dict = dataset['popularity_dict']
+
         self.n_users_dict = {"training": len(dataset["training_data"]), "validation": len(dataset["validation_data"]),
                              "test": len(dataset["test_data"])}
-
+        self.absolute_item_popularity_dict = {split_type: [elem * self.n_users_dict[split_type]
+                                                           for elem in dataset['popularity_dict'][split_type]]
+                                                            for split_type in dataset['popularity_dict']
+                                              }
         self.thresholds = dataset['thresholds']
-        self.absolute_thresholds = list(map(lambda x:x*self.n_users, self.thresholds))
+        self.absolute_thresholds = list(map(lambda x:x*self.n_users_dict["training"], self.thresholds))
 
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
         self.model_type = model_type
 
         # IMPROVEMENT
-        self.low_pop = len([i for i in self.item_popularity if i <= self.thresholds[0]])
-        self.med_pop = len([i for i in self.item_popularity if self.thresholds[0] < i <= self.thresholds[1]])
-        self.high_pop = len([i for i in self.item_popularity if self.thresholds[1] < i])
+        self.low_pop = len([i for i in self.item_popularity_dict["training"] if i <= self.thresholds[0]])
+        self.med_pop = len([i for i in self.item_popularity_dict["training"] if self.thresholds[0] < i <= self.thresholds[1]])
+        self.high_pop = len([i for i in self.item_popularity_dict["training"] if self.thresholds[1] < i])
 
         # compute the Beta parameter according to the item popularity
         if self.model_type == model_types.REWEIGHTING:
+            self.absolute_item_popularity = np.array(self.absolute_item_popularity_dict["training"])
             # Beta is defined as the average popularity of the medium-popular class of items
             self.beta = self.absolute_item_popularity[(self.absolute_item_popularity >= self.absolute_thresholds[0]) &
                                                  (self.absolute_item_popularity < self.absolute_thresholds[1])].mean()
@@ -384,11 +389,13 @@ class DataLoader:
 
         return positives, negatives
 
-    def iter(self, batch_size=256, tag='train'):
+    def iter(self, batch_size=256, tag='train', model_type="rvae"):
         """
         Iter on data
 
         :param batch_size: size of the batch
+        :param tag: tag in {train, validation, test} tells you from which sample to extract data
+        :param model_type: if "bpr" then you also need the user indexes
         :return: batch_idx, x, pos, neg, mask_pos, mask_neg
         """
 
@@ -404,9 +411,12 @@ class DataLoader:
             mask = self.mask_sparse[tag][raw_idxs].A
             pos = self.pos_sparse[tag][raw_idxs].A
             neg = self.neg_sparse[tag][raw_idxs].A
-            yield x, pos, neg, mask
+            if model_type=="rvae":
+                yield x, pos, neg, mask
+            else:
+                yield x, pos, neg, mask, raw_idxs
 
-    def iter_test(self, batch_size=256, tag='test'):
+    def iter_test(self, batch_size=256, tag='test', model_type="rvae"):
         """
         Iter on data
 
@@ -436,7 +446,10 @@ class DataLoader:
             neg_te = self.neg_rank[tag][start_idx:end_idx]
             mask_pos_te = self.mask_rank[tag][start_idx:end_idx]
 
-            yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te
+            if model_type=="rvae":
+                yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te
+            else:
+                yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te, raw_idxs
 
     def get_items_counts_by_cat(self, tag):
         """
@@ -533,27 +546,6 @@ class CachedDataLoader(DataLoader):
 
             self.item_popularity = np.array(self.item_popularity)
             self._init_item_struct(decreasing_factor, alpha, gamma)
-
-
-        print(f"min frequency: {min(self.frequencies)}")
-        print(f"max frequency: {max(self.frequencies)}")
-
-        print('DATASET STATS ------------------------------')
-        print('users:', self.n_users)
-        print('items:', self.n_items)
-        print('low_pop:', self.low_pop)
-        print('med_pop:', self.med_pop)
-        print('high_pop:', self.high_pop)
-        print('thresholds:', self.thresholds)
-        print('max_popularity:', self.max_popularity)
-        print('min_popularity:', self.min_popularity)
-        print('max_frequency:', max(self.frequencies))
-        print('min_frequency:', min(self.frequencies))
-        print('num(max_popularity):', sum(self.item_popularity == self.max_popularity))
-        print('num(min_popularity):', sum(self.item_popularity == self.min_popularity))
-        print('sorted(self.sorted_item_popularity)[:100]:', sorted(self.sorted_item_popularity[:10]))
-        print('sorted(self.sorted_item_popularity)[-100:]:', sorted(self.sorted_item_popularity[-10:]))
-        print('sorted(frequencies):', sorted(self.frequencies)[:10])
 
         if model_type == model_types.REWEIGHTING:
             def _creating_csr_mask(x, input_shape):

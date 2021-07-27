@@ -10,8 +10,8 @@ import json
 import pickle
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
-from models import MultiVAE
-from loss_func import rvae_rank_pair_loss
+from models import BPR_MF
+from loss_func import bpr_rank_pair_loss
 from data_loaders import DataLoader, CachedDataLoader
 from config import Config
 
@@ -19,7 +19,7 @@ datasets = Config("./datasets_info.json")
 model_types = Config("./model_type_info.json")
 
 # SETTINGS ------------------------------------------
-config = Config("./rvae_config.json")
+config = Config("./bpr_config.json")
 
 if 'CUDA_VISIBLE_DEVICES' not in os.environ:
     os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
@@ -29,13 +29,11 @@ model_type = eval(config.model_type)
 copy_pasting_data = eval(config.copy_pasting_data)
 config.cached_dataloader = eval(config.cached_dataloader if 'cached_dataloader' in config else 'False')
 config.metrics_scale = eval(config.metrics_scale)
-config.use_popularity = eval(config.use_popularity)
-config.p_dims = eval(config.p_dims)
+config.latent_dim = eval(config.latent_dim)
 config.alpha = float(config.get('alpha', -1))
 config.gamma = float(config.get('gamma', -1))
-if config.alpha<0 or config.gamma < 0:
-    config.alpha=None
-    config.gamma=None
+if model_type == "reweighting":
+    assert config.alpha > 0 and config.gamma > 0, config.alpha
 # ---------------------------------------------------
 
 # set seed for experiment reproducibility
@@ -58,7 +56,7 @@ data_dir = os.path.expanduser('./data')
 data_dir = os.path.join(data_dir, dataset_name)
 dataset_file = os.path.join(data_dir, 'data_rvae')
 
-result_dir = os.path.join(data_dir, 'results')
+result_dir = os.path.join(data_dir, 'bpr' , 'results')
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
@@ -91,7 +89,7 @@ else:
 
 
 n_items = trainloader.n_items
-config.p_dims.append(n_items)
+n_users = trainloader.n_users
 popularity = trainloader.item_popularity_dict["training"]
 thresholds = trainloader.thresholds
 frequencies = trainloader.frequencies_dict["training"]
@@ -116,24 +114,20 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
-    for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=config.batch_size)):
+    for batch_idx, (x, pos, neg, mask, user_idxs) in enumerate(dataloader.iter(batch_size=config.batch_size, model_type="bpr")):
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
         mask = naive_sparse2tensor(mask).to(device)
+        user_idxs = torch.LongTensor(user_idxs.toarray() if hasattr(user_idxs, 'toarray') else user_idxs)
 
         update_count += 1
-        if config.total_anneal_steps > 0:
-            anneal = min(config.anneal_cap, 1. * update_count / config.total_anneal_steps)
-        else:
-            anneal = config.anneal_cap
 
         # TRAIN on batch
         optimizer.zero_grad()
-        y, mu, logvar = model(x)
+        y = model(user_idxs)
 
-        # loss = criterion(recon_batch, x, pos_items, neg_items, mask, mask, mu, logvar, anneal)
-        loss = criterion(x, y, mu, logvar, anneal, pos_items=pos_items, neg_items=neg_items, mask=mask,
+        loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask,
                          model_type=model_type)
         loss.backward()
         optimizer.step()
@@ -162,7 +156,7 @@ def train(dataloader, epoch, optimizer):
 top_k = (1, 5, 10)
 
 
-def evaluate(dataloader, popularity, tag='validation'):
+def evaluate(dataloader, normalized_popularity, tag='validation'):
     # print("STARTING TO EVAL")
     # Turn on evaluation mode
     model.eval()
@@ -175,23 +169,23 @@ def evaluate(dataloader, popularity, tag='validation'):
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
-                dataloader.iter_test(batch_size=config.batch_size, tag=tag)):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, user_idxs) in enumerate(
+                dataloader.iter_test(batch_size=config.batch_size, tag=tag, model_type="bpr")):
             # print(f"[EVAL]: Entering batch {batch_idx}")
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
             mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
+            user_idxs = torch.LongTensor(user_idxs.toarray() if hasattr(user_idxs, 'toarray') else user_idxs)
             # print("[EVAL]: batch data have been processed")
             batch_num += 1
             n_users_train += x_tensor.shape[0]
 
             x_input = x_tensor * (1 - mask_te)
-            y, mu, logvar = model(x_input, True)
-            # print("[EVAL]: model forward done")
-            #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
-            loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
+            y = model(user_idxs)
+
+            loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
             # print("[EVAL]: Loss computed")
             result['loss'] += loss.item()
 
@@ -218,11 +212,11 @@ torch.set_printoptions(profile="full")
 n_epochs = config.n_epochs
 update_count = 0
 
-print(config.p_dims)
-model = MultiVAE(config.p_dims)
+# weight decay is None because loss computation is outside the model this time
+model = BPR_MF(user_size=n_users, item_size=n_items, dim=config.latent_dim, weight_decay=None)
 model = model.to(device)
 
-criterion = rvae_rank_pair_loss(device=device, popularity=popularity if model_type in (model_types.LOW, model_types.MED,
+criterion = bpr_rank_pair_loss(device=device, popularity=popularity if model_type in (model_types.LOW, model_types.MED,
                                                                 model_types.HIGH) else None,
                                 scale=config.scale,
                                 thresholds=thresholds,
@@ -294,7 +288,7 @@ except KeyboardInterrupt:
 
 # output.show()
 
-model = MultiVAE(config.p_dims)
+model = BPR_MF(user_size=n_users, item_size=n_items, dim=config.latent_dim, weight_decay=None)
 model = model.to(device)
 model.load_state_dict(torch.load(file_model, map_location=device))
 model.eval()

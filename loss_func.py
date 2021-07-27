@@ -5,6 +5,74 @@ from config import Config
 model_types = Config("./model_type_info.json")
 
 
+class bpr_loss(nn.Module):
+    def __init__(self, popularity=None, scale=1., beta=1., thresholds=None, frequencies=None, device="cpu"):
+        super(bpr_loss, self).__init__()
+
+        if popularity is not None:
+            # FIXME: make sure that keys are aligned with positions
+            # self.popularity = torch.tensor(list(popularity.values())).to(device)
+            self.popularity = torch.tensor(popularity).to(device)
+            self.frequencies = torch.tensor(frequencies).to(device)
+            self.thresholds = thresholds
+        else:
+            self.popularity = None
+            self.thresholds = None
+
+        self.logsigmoid = torch.nn.LogSigmoid()
+
+        self.scale = scale
+        self.beta = beta
+
+    def weight(self, pos_items, mask, one_as_default=True):
+        weight = mask
+        return weight
+
+
+    def forward(self, x, y, **args):
+        n_llk = self.log_p(x, y, **args)
+        return n_llk
+
+class bpr_rank_pair_loss(bpr_loss):
+    def __init__(self, device, **kargs):
+        super(bpr_rank_pair_loss, self).__init__(**kargs)
+        self.device = device
+
+    def log_p(self, x, y, pos_items, neg_items, mask, model_type):
+
+        # assert mask.sum() > 0
+        if model_type == model_types.REWEIGHTING:
+            weight = mask
+            # assert weight.sum() > 0
+            mask = mask > 0
+        else:
+            weight = mask
+
+
+        y1 = torch.gather(y, 1, pos_items.long()) * mask
+        y2 = torch.gather(y, 1, neg_items.long()) * mask
+
+        # Building filters for different classes of items
+        if model_type == model_types.MED:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (self.thresholds[0] < pop_pos <= self.thresholds[1]).float().to(self.device)  # medium
+        elif model_type == model_types.HIGH:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (pop_pos > self.thresholds[1]).float().to(self.device)  # high
+        elif model_type == model_types.LOW:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
+
+        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
+            neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        else:
+            neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+            del pop_pos
+            del filter_pos
+
+        torch.cuda.empty_cache()
+        return neg_ll
+
 class rvae_loss(nn.Module):
     def __init__(self, popularity=None, scale=1., beta=1., thresholds=None, frequencies=None, device="cpu"):
         super(rvae_loss, self).__init__()

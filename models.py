@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
 class MultiVAE(nn.Module):
@@ -159,35 +160,6 @@ class EnsembleMultiVAE(nn.Module):
             # y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
             y_e = z_a + z_b * self.gamma
 
-        '''
-        CITE U LIKE ----------------------------------------------------------------------------------------------------
-
-        BASELINE
-        luciano_stat_by_pop@1  0.07,0.22,0.67
-        luciano_stat_by_pop@10 0.48,0.75,0.95
-        luciano_stat_by_pop@5  0.29,0.57,0.90
-
-        ENSEMBLE (old)
-        luciano_stat_by_pop@1  0.17,0.20,0.66
-        luciano_stat_by_pop@10 0.72,0.63,0.91
-        luciano_stat_by_pop@5  0.51,0.49,0.87
-
-        ENSEMBLE (filter gamma=1.0)
-        luciano_stat_by_pop@1  0.16,0.19,0.65
-        luciano_stat_by_pop@10 0.76,0.53,0.88
-        luciano_stat_by_pop@5  0.52,0.43,0.84
-
-        ENSEMBLE (filter gamma=0.9)
-        luciano_stat_by_pop@1  0.15,0.20,0.66
-        luciano_stat_by_pop@10 0.71,0.57,0.89
-        luciano_stat_by_pop@5  0.47,0.46,0.85
-
-        ENSEMBLE (filter gamma=0.5)
-        luciano_stat_by_pop@1  0.09,0.21,0.66
-        luciano_stat_by_pop@10 0.60,0.63,0.91
-        luciano_stat_by_pop@5  0.38,0.50,0.87
-        '''
-
         return y_e
 
     def init_weights(self):
@@ -201,3 +173,80 @@ class EnsembleMultiVAE(nn.Module):
 
             # Normal Initialization for Biases
             layer.bias.data.normal_(0.0, 0.001)
+
+
+class BPR(nn.Module):
+    def __init__(self, user_num, item_num, factor_num):
+        super(BPR, self).__init__()
+        self.embed_user = nn.Embedding(user_num, factor_num)
+        self.embed_item = nn.Embedding(item_num, factor_num)
+
+        nn.init.normal_(self.embed_user.weight, std=0.01)
+        nn.init.normal_(self.embed_item.weight, std=0.01)
+
+    def forward(self, user, item_i, item_j):
+        user = self.embed_user(user)
+        item_i = self.embed_item(item_i)
+        item_j = self.embed_item(item_j)
+
+        prediction_i = (user * item_i).sum(dim=-1)
+        prediction_j = (user * item_j).sum(dim=-1)
+
+        return prediction_i, prediction_j
+
+
+class BPR_MF(nn.Module):
+    # provided by https://github.com/sh0416/bpr/blob/master/train.py
+    def __init__(self, user_size, item_size, dim, weight_decay):
+        super().__init__()
+        self.W = nn.Parameter(torch.empty(user_size, dim))
+        self.H = nn.Parameter(torch.empty(item_size, dim))
+        nn.init.xavier_normal_(self.W.data)
+        nn.init.xavier_normal_(self.H.data)
+        self.weight_decay = weight_decay
+
+    def forward(self, u, i, j):
+        """Return loss value.
+
+        Args:
+            u(torch.LongTensor): tensor stored user indexes. [batch_size,]
+            i(torch.LongTensor): tensor stored item indexes which is prefered by user. [batch_size,]
+            j(torch.LongTensor): tensor stored item indexes which is not prefered by user. [batch_size,]
+
+        Returns:
+            torch.FloatTensor
+        """
+        u = self.W[u, :]
+        i = self.H[i, :]
+        j = self.H[j, :]
+        x_ui = torch.mul(u, i).sum(dim=1)
+        x_uj = torch.mul(u, j).sum(dim=1)
+        x_uij = x_ui - x_uj
+        log_prob = F.logsigmoid(x_uij).sum()
+        regularization = self.weight_decay * (
+                    u.norm(dim=1).pow(2).sum() + i.norm(dim=1).pow(2).sum() + j.norm(dim=1).pow(2).sum())
+        return -log_prob + regularization
+
+    def forward(self, u):
+        """Return probability distribution on the set of items
+
+        Args:
+            u(torch.LongTensor): tensor stored user indexes. [batch_size,]
+        Returns:
+            torch.FloatTensor
+        """
+        u = self.W[u, :]
+        x_ui = torch.mm(u, self.H.t())
+        return x_ui
+
+    def recommend(self, u):
+        """Return recommended item list given users.
+        Args:
+            u(torch.LongTensor): tensor stored user indexes. [batch_size,]
+        Returns:
+            pred(torch.LongTensor): recommended item list sorted by preference. [batch_size, item_size]
+        """
+        u = self.W[u, :]
+        x_ui = torch.mm(u, self.H.t())
+        pred = torch.argsort(x_ui, dim=1)
+        return pred
