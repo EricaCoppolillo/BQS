@@ -175,24 +175,40 @@ class EnsembleMultiVAE(nn.Module):
             layer.bias.data.normal_(0.0, 0.001)
 
 
-class BPR(nn.Module):
-    def __init__(self, user_num, item_num, factor_num):
+class BPR(torch.nn.Module):
+    def __init__(self, n_users, n_items, n_factors):
         super(BPR, self).__init__()
-        self.embed_user = nn.Embedding(user_num, factor_num)
-        self.embed_item = nn.Embedding(item_num, factor_num)
 
-        nn.init.normal_(self.embed_user.weight, std=0.01)
-        nn.init.normal_(self.embed_item.weight, std=0.01)
+        self.embed_user = torch.nn.Embedding(n_users, n_factors)
+        self.embed_item = torch.nn.Embedding(n_items, n_factors)
 
-    def forward(self, user, item_i, item_j):
+        self.init_weights()
+
+    def init_weights(self):
+        torch.nn.init.xavier_uniform_(self.embed_user.weight)
+        torch.nn.init.xavier_uniform_(self.embed_item.weight)
+
+    def forward(self, user, item_i, item_j=None):
         user = self.embed_user(user)
         item_i = self.embed_item(item_i)
-        item_j = self.embed_item(item_j)
-
         prediction_i = (user * item_i).sum(dim=-1)
-        prediction_j = (user * item_j).sum(dim=-1)
 
-        return prediction_i, prediction_j
+        if item_j is not None:
+            item_j = self.embed_item(item_j)
+            prediction_j = (user * item_j).sum(dim=-1)
+
+            return prediction_i - prediction_j
+
+        return prediction_i
+
+    def score(self, user, items):
+        user = self.embed_user(user)
+        user = user.unsqueeze(-1)
+
+        items_t = self.embed_item(items)
+        scores = torch.bmm(items_t, user).squeeze(-1)
+
+        return scores
 
 
 class BPR_MF(nn.Module):
