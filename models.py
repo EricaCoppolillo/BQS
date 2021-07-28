@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+
 class MultiVAE(nn.Module):
     """
     Container module for Multi-VAE.
@@ -105,6 +106,32 @@ class MultiVAE(nn.Module):
             # Normal Initialization for Biases
             layer.bias.data.normal_(0.0, 0.001)
 
+
+class EnsembleMultiVAETrainable(nn.Module):
+
+    def __init__(self):  # n_items, popularity, thresholds=None, device='cpu'):
+        super().__init__()
+
+        # self.n_items = n_items
+        # self.test_print = False
+        # self.popularity = popularity
+        # self.thresholds = thresholds
+
+        self.alpha = nn.Parameter(torch.tensor(1.))
+        self.beta = nn.Parameter(torch.tensor(1.))
+
+        # self.filter_a = torch.tensor(np.array(self.popularity) > self.thresholds[0]).to(device).float()  # baseline
+        # self.filter_b = torch.tensor(np.array(self.popularity) <= self.thresholds[0]).to(device).float()  # low
+
+    def forward(self, x, y_a, y_b):
+        # z_a = torch.softmax(y_a, 1)
+        # z_b = torch.softmax(y_b, 1)
+        z_a = y_a
+        z_b = y_b
+
+        y_e = self.alpha * z_a + self.beta * z_b
+        return y_e
+    
 
 class EnsembleMultiVAE(nn.Module):
 

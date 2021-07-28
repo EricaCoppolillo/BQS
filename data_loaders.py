@@ -972,7 +972,59 @@ CREATE TABLE testset (
             self.size[name] = cur.execute(f'SELECT COUNT(*) AS cnt FROM {tablename}').fetchone()[0]
 
 
-class EnsembleDataLoader:
+class EnsembleDataLoader(DataLoader):
+    def __init__(self, data_dir, p_dims, seed, decreasing_factor, model_type=model_types.BASELINE,
+                 pos_neg_ratio=4, negatives_in_test=100, alpha=None,
+                 gamma=None, device='cpu'):
+        super().__init__(os.path.join(data_dir, 'data_rvae'), seed, decreasing_factor, model_type,
+                       pos_neg_ratio, negatives_in_test, alpha, gamma)
+
+        # loading models
+        print('Loading ensemble models...')
+        first_model, second_model = model_types.BASELINE, model_types.LOW
+        baseline_dir = os.path.join(data_dir, first_model)
+        popularity_dir = os.path.join(data_dir, second_model)
+
+        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
+        popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
+
+        p_dims.append(self.n_items)
+        self.baseline_model = MultiVAE(p_dims)
+        self.baseline_model.load_state_dict(torch.load(baseline_file_model, map_location=device))
+        print(f"Loaded {first_model} model")
+        self.popularity_model = MultiVAE(p_dims)
+        self.popularity_model.load_state_dict(torch.load(popularity_file_model, map_location=device))
+        print(f"Loaded {second_model} model")
+        self.baseline_model.to(device)
+        self.popularity_model.to(device)
+        self.baseline_model.eval()
+        self.popularity_model.eval()
+        print('ensemble models loaded!')
+
+    def iter_ensemble(self, batch_size=256, tag='train', device="cpu"):
+        for batch_idx, (x, pos, neg, mask) in enumerate(self.iter(batch_size=batch_size, tag=tag)):
+            x_tensor = naive_sparse2tensor(x).to(device)
+
+            y_a, _, _ = self.baseline_model(x_tensor, True)
+            y_b, _, _ = self.popularity_model(x_tensor, True)
+
+            yield x, pos, neg, mask, y_a, y_b
+
+    def iter_test_ensemble(self, batch_size=256, tag='test', device="cpu"):
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_pos_te) in enumerate(
+                self.iter_test(batch_size=batch_size, tag=tag)):
+            x_tensor = naive_sparse2tensor(x).to(device)
+            mask_te_tensor = naive_sparse2tensor(mask_pos_te).to(device)
+
+            x_input = x_tensor * (1 - mask_te_tensor)
+
+            y_a, _, _ = self.baseline_model(x_input, True)
+            y_b, _, _ = self.popularity_model(x_input, True)
+
+            yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te, y_a, y_b
+
+
+class EnsembleDataLoaderOld:
     def __init__(self, data_dir, p_dims, seed, decreasing_factor, pos_neg_ratio=4, negatives_in_test=100,
                   chunk_size=1000, device="cpu"):
 
@@ -1377,18 +1429,26 @@ class EnsembleDataLoader:
             yield x, pos, neg, mask
 
     def iter_test_ensemble(self, batch_size=256, tag='train', device="cpu"):
+        if tag == 'train':
+            for batch_idx, (x, pos, neg, mask) in enumerate(
+                    self.iter(batch_size=batch_size, tag=tag)):
 
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
-                self.iter_test(batch_size=batch_size, tag=tag)):
-            x_tensor = naive_sparse2tensor(x).to(device)
-            mask_te_tensor = naive_sparse2tensor(mask_te).to(device)
+                y_a, _, _ = self.baseline_model(x, True)
+                y_b, _, _ = self.popularity_model(x, True)
 
-            x_input = x_tensor * (1 - mask_te_tensor)
+                yield x, pos, neg, mask, y_a, y_b
+        else:
+            for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
+                    self.iter_test(batch_size=batch_size, tag=tag)):
+                x_tensor = naive_sparse2tensor(x).to(device)
+                mask_te_tensor = naive_sparse2tensor(mask_te).to(device)
 
-            y_a, _, _ = self.baseline_model(x_input, True)
-            y_b, _, _ = self.popularity_model(x_input, True)
+                x_input = x_tensor * (1 - mask_te_tensor)
 
-            yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b
+                y_a, _, _ = self.baseline_model(x_input, True)
+                y_b, _, _ = self.popularity_model(x_input, True)
+
+                yield x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b
 
     def iter_test(self, batch_size=256, tag='test'):
         """

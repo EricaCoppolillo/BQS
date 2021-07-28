@@ -135,15 +135,6 @@ class ensemble_rvae_loss(nn.Module):
         weight = mask
         return weight
 
-    def kld(self, mu, logvar):
-        # see Appendix B from VAE paper:
-        # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-        # https://arxiv.org/abs/1312.6114
-        # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-        KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
-
-        return KLD
-
 
 class rvae_rank_pair_loss(rvae_loss):
     def __init__(self, device, **kargs):
@@ -191,8 +182,45 @@ class ensemble_rvae_rank_pair_loss(rvae_loss):
     def __init__(self, **kargs):
         super(ensemble_rvae_rank_pair_loss, self).__init__(**kargs)
 
-    def log_p(self, x, y, pos_items, neg_items, mask):
-        return 0
+    def log_p(self, x, y, pos_items, neg_items, mask, model_type=model_types.BASELINE):
+
+        # assert mask.sum() > 0
+        if model_type == model_types.REWEIGHTING:
+            weight = mask
+            # assert weight.sum() > 0
+            mask = mask > 0
+        else:
+            weight = mask
+
+        y1 = torch.gather(y, 1, pos_items.long()) * mask
+        y2 = torch.gather(y, 1, neg_items.long()) * mask
+
+        # Building filters for different classes of items
+        if model_type == model_types.MED:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (self.thresholds[0] < pop_pos <= self.thresholds[1]).float().to(self.device)  # medium
+        elif model_type == model_types.HIGH:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (pop_pos > self.thresholds[1]).float().to(self.device)  # high
+        elif model_type == model_types.LOW:
+            pop_pos = self.popularity[pos_items.long()]
+            filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
+
+        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
+            # assert mask.sum() > 0
+            neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
+        else:
+            neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+            del pop_pos
+            del filter_pos
+
+        torch.cuda.empty_cache()
+        return neg_ll
+
+    def forward(self, x, y, **args):
+        n_llk = self.log_p(x, y, **args)
+
+        return n_llk
 
 
 class rvae_focal_loss(rvae_loss):
