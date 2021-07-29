@@ -1,3 +1,4 @@
+import itertools
 import os
 import gc
 import json
@@ -1008,7 +1009,7 @@ class EnsembleDataLoader(DataLoader):
             y_a, _, _ = self.baseline_model(x_tensor, True)
             y_b, _, _ = self.popularity_model(x_tensor, True)
 
-            yield x, pos, neg, mask, y_a, y_b
+            yield x, pos, neg, mask, y_a.detach(), y_b.detach()
 
     def iter_test_ensemble(self, batch_size=256, tag='test', device="cpu"):
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_pos_te) in enumerate(
@@ -1021,7 +1022,7 @@ class EnsembleDataLoader(DataLoader):
             y_a, _, _ = self.baseline_model(x_input, True)
             y_b, _, _ = self.popularity_model(x_input, True)
 
-            yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te, y_a, y_b
+            yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te, y_a.detach(), y_b.detach()
 
 
 class EnsembleDataLoaderOld:

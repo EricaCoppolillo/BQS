@@ -107,6 +107,37 @@ class MultiVAE(nn.Module):
             layer.bias.data.normal_(0.0, 0.001)
 
 
+class EnsembleMultiVAENet(nn.Module):
+
+    def __init__(self, n_items):
+        super().__init__()
+
+        # self.layer = nn.Linear(2 * n_items, n_items)
+        # self.layer = nn.Linear(2, 1)
+        a = torch.ones(size=(n_items,)) * .5
+        self.alpha = nn.Parameter(a)
+        self.beta = 0
+
+    def forward(self, x, y_a, y_b):
+        print(x.shape)
+        z_a = torch.softmax(y_a, 1)
+        z_b = torch.softmax(y_b, 1)
+        # z_a = z_a.unsqueeze(-1)
+        # z_b = z_b.unsqueeze(-1)
+        #
+        # y_e = torch.cat((z_a, z_b), dim=-1)
+        # y_e = self.layer(y_e)
+        #
+        # y_e = y_e.squeeze()
+
+        alpha = torch.sigmoid(self.alpha)
+
+        alpha = alpha.repeat(z_a.shape[0], 1)
+        y_e = alpha * z_a + (1-alpha) * z_b
+
+        return y_e
+
+
 class EnsembleMultiVAETrainable(nn.Module):
 
     def __init__(self):  # n_items, popularity, thresholds=None, device='cpu'):
@@ -120,18 +151,29 @@ class EnsembleMultiVAETrainable(nn.Module):
         self.alpha = nn.Parameter(torch.tensor(1.))
         self.beta = nn.Parameter(torch.tensor(1.))
 
+        # self.beta = 0
+        # self.alpha = nn.Parameter(torch.tensor(.5))
+
         # self.filter_a = torch.tensor(np.array(self.popularity) > self.thresholds[0]).to(device).float()  # baseline
         # self.filter_b = torch.tensor(np.array(self.popularity) <= self.thresholds[0]).to(device).float()  # low
 
     def forward(self, x, y_a, y_b):
-        # z_a = torch.softmax(y_a, 1)
-        # z_b = torch.softmax(y_b, 1)
-        z_a = y_a
-        z_b = y_b
+        z_a = torch.softmax(y_a, 1)
+        z_b = torch.softmax(y_b, 1)
+        # z_a = y_a
+        # z_b = y_b
 
-        y_e = self.alpha * z_a + self.beta * z_b
+        # y_e = self.alpha * z_a + self.beta * z_b
+        # alpha = torch.sigmoid(self.alpha)
+        # y_e = alpha * z_a + (1 - alpha) * z_b
+
+        # alpha = torch.sigmoid(self.alpha)
+        # beta = torch.sigmoid(self.beta)
+        alpha = self.alpha
+        beta = self.beta
+        y_e = alpha * z_a + beta * z_b
         return y_e
-    
+
 
 class EnsembleMultiVAE(nn.Module):
 
@@ -144,8 +186,8 @@ class EnsembleMultiVAE(nn.Module):
         self.thresholds = thresholds
         self.gamma = gamma
 
-        self.filter_a = torch.tensor(np.array(self.popularity) > self.thresholds[0]).to(device).float()  # baseline
-        self.filter_b = torch.tensor(np.array(self.popularity) <= self.thresholds[0]).to(device).float()  # low
+        # self.filter_a = torch.tensor(np.array(self.popularity) > self.thresholds[0]).to(device).float()  # baseline
+        # self.filter_b = torch.tensor(np.array(self.popularity) <= self.thresholds[0]).to(device).float()  # low
 
     def normalize(self, tensor):
         min_v = torch.min(tensor)
@@ -160,24 +202,24 @@ class EnsembleMultiVAE(nn.Module):
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
 
-        if self.test_print:
-            print('ENSEMBLE TEST PRINT (train) ---------------------------------------')
-            print('Shape x, x[0]:', len(x), len(x[0]))
-            print('Shape y_a, y_a[0]:', len(y_a), len(y_a[0]))
-            print('Shape y_b, y_b[0]:', len(y_b), len(y_b[0]))
-            print('Shape popularity:', len(self.popularity))
-            print('Type popularity:', type(self.popularity))
-            print('x[0][:100]:', x[0][:100])
-            print('y_a[0][:100]:', y_a[0][:100])
-            print('y_b[0][:100]:', y_b[0][:100])
-            print('z_a[0][:100]:', z_a[0][:100])
-            print('z_b[0][:100]:', z_b[0][:100])
-            print('popularity:', self.popularity[:100])
-            print('filter a:', self.filter_a[:100])
-            print('filter b:', self.filter_b[:100])
-            print('thresholds:', self.thresholds)
-            print('-------------------------------------------------------------------')
-            self.test_print = False
+        # if self.test_print:
+        #     print('ENSEMBLE TEST PRINT (train) ---------------------------------------')
+        #     print('Shape x, x[0]:', len(x), len(x[0]))
+        #     print('Shape y_a, y_a[0]:', len(y_a), len(y_a[0]))
+        #     print('Shape y_b, y_b[0]:', len(y_b), len(y_b[0]))
+        #     print('Shape popularity:', len(self.popularity))
+        #     print('Type popularity:', type(self.popularity))
+        #     print('x[0][:100]:', x[0][:100])
+        #     print('y_a[0][:100]:', y_a[0][:100])
+        #     print('y_b[0][:100]:', y_b[0][:100])
+        #     print('z_a[0][:100]:', z_a[0][:100])
+        #     print('z_b[0][:100]:', z_b[0][:100])
+        #     print('popularity:', self.popularity[:100])
+        #     print('filter a:', self.filter_a[:100])
+        #     print('filter b:', self.filter_b[:100])
+        #     print('thresholds:', self.thresholds)
+        #     print('-------------------------------------------------------------------')
+        #     self.test_print = False
 
         baseline = False
 
