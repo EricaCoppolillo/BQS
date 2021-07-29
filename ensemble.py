@@ -2,9 +2,9 @@ import time
 
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
-from data_loaders import EnsembleDataLoader
+from data_loaders import EnsembleDataLoader, EnsembleDataLoaderOld
 from models import EnsembleMultiVAE, EnsembleMultiVAETrainable
-from loss_func import ensemble_rvae_rank_pair_loss, ensemble_rvae_focal_loss
+from loss_func import ensemble_rvae_rank_pair_loss
 from config import Config
 import torch
 import numpy as np
@@ -74,8 +74,13 @@ In test the data is reported with 3 masks of items with less, middle and top pop
 """
 
 # Dataloader
-trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                 device=device)
+if config.model_type == 'trainable':
+    trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                     device=device)
+else:
+    trainloader = EnsembleDataLoaderOld(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                     device=device)
+
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)

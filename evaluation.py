@@ -129,7 +129,7 @@ class MetricAccumulator:
             positive_items = set(pos[user])
             score[input_idx] = - np.inf  # hide viewed
             predicted_item = positive_items - viewed_item  # si considerano solo gli oggetti non forniti in input
-
+            # TODO: assert positive_items intersection viewed_item is 0
             ranked_idx = np.argsort(-score)  # indici degli items ordinati per score in modo decrescente
             ranked_top_k_idx = ranked_idx[:top_k]  # indici dei top K elementi (ordinati per score in modo decrescente)
 

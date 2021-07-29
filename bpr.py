@@ -10,7 +10,7 @@ import json
 import pickle
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
-from models import BPR_MF
+from models import BPR_MF, BPR
 from loss_func import bpr_rank_pair_loss
 from data_loaders import DataLoader, CachedDataLoader
 from config import Config
@@ -54,7 +54,7 @@ else:
 data_dir = os.path.expanduser('./data')
 
 data_dir = os.path.join(data_dir, dataset_name)
-dataset_file = os.path.join(data_dir, 'data_rvae')
+dataset_file = os.path.join(data_dir, 'data_bpr')
 
 result_dir = os.path.join(data_dir, 'bpr' , 'results')
 if not os.path.exists(result_dir):
@@ -89,6 +89,8 @@ else:
 
 
 n_items = trainloader.n_items
+all_item_idxs = torch.LongTensor(range(n_items))
+all_item_idxs = all_item_idxs.to(device)
 n_users = trainloader.n_users
 popularity = trainloader.item_popularity_dict["training"]
 thresholds = trainloader.thresholds
@@ -114,18 +116,19 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
+
     for batch_idx, (x, pos, neg, mask, user_idxs) in enumerate(dataloader.iter(batch_size=config.batch_size, model_type="bpr")):
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
         mask = naive_sparse2tensor(mask).to(device)
         user_idxs = torch.LongTensor(user_idxs.toarray() if hasattr(user_idxs, 'toarray') else user_idxs)
-
+        user_idxs = user_idxs.to(device)
         update_count += 1
 
         # TRAIN on batch
         optimizer.zero_grad()
-        y = model(user_idxs)
+        y = model(user_idxs, all_item_idxs)
 
         loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask,
                          model_type=model_type)
@@ -178,12 +181,15 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
             mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
             user_idxs = torch.LongTensor(user_idxs.toarray() if hasattr(user_idxs, 'toarray') else user_idxs)
+            user_idxs = user_idxs.to(device)
+            user_idxs += dataloader.discount_idxs[tag]
+
             # print("[EVAL]: batch data have been processed")
             batch_num += 1
             n_users_train += x_tensor.shape[0]
 
             x_input = x_tensor * (1 - mask_te)
-            y = model(user_idxs)
+            y = model(user_idxs, all_item_idxs)
 
             loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
             # print("[EVAL]: Loss computed")
@@ -213,7 +219,7 @@ n_epochs = config.n_epochs
 update_count = 0
 
 # weight decay is None because loss computation is outside the model this time
-model = BPR_MF(user_size=n_users, item_size=n_items, dim=config.latent_dim, weight_decay=None)
+model = BPR(n_users=n_users, n_items=n_items, n_factors=config.latent_dim)
 model = model.to(device)
 
 criterion = bpr_rank_pair_loss(device=device, popularity=popularity if model_type in (model_types.LOW, model_types.MED,
@@ -288,7 +294,7 @@ except KeyboardInterrupt:
 
 # output.show()
 
-model = BPR_MF(user_size=n_users, item_size=n_items, dim=config.latent_dim, weight_decay=None)
+model = BPR(n_users=n_users, n_items=n_items, n_factors=config.latent_dim)
 model = model.to(device)
 model.load_state_dict(torch.load(file_model, map_location=device))
 model.eval()

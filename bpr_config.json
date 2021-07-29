@@ -1,12 +1,12 @@
 {
-  "CUDA_VISIBLE_DEVICES": "2",
-    "dataset_name": "datasets.MOVIELENS_1M",
-    "model_type": "model_types.OVERSAMPLING",
+  "CUDA_VISIBLE_DEVICES": "",
+    "dataset_name": "datasets.PINTEREST",
+    "model_type": "model_types.BASELINE",
     "copy_pasting_data": "True",
 
     "alpha": 0.01,
     "gamma": 53.33,
-    "n_epochs": 50,
+    "n_epochs": 200,
     "batch_size": 1024,
     "weight_decay": 0.0,
     "learning_rate": 1e-3,
