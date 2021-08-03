@@ -1,5 +1,5 @@
 # pick dataset(s) of interest - MOVIELENS_1M MOVIELENS_20M CITEULIKE PINTEREST EPINIONS NETFLIX
-declare -a datasets=("MOVIELENS_1M" "PINTEREST" "MOVIELENS_20M")
+declare -a datasets=("MOVIELENS_20M")
 declare -A datasets_path_name=( ["MOVIELENS_1M"]="ml-1m" ["MOVIELENS_20M"]="ml-20m" ["CITEULIKE"]="citeulike-a" ["PINTEREST"]="pinterest" ["EPINIONS"]="epinions" ["NETFLIX"]="netflix")
 cuda="1"
 # moving in the parent directory

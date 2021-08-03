@@ -381,6 +381,8 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
     for k in config.__dict__:
         fp.write(f'{k} = {config.__dict__[k]}\n')
 
+    fp.write(f"Average_Exposure = {np.mean(trainloader.item_visibility_dict['training'])}")
+    fp.write(f"Std_Exposure = {np.std(trainloader.item_visibility_dict['training'])}")
 #    fp.write('\n' * 4)
 #    model_print, _ = torchsummary.summary_string(model, (dataloader.n_items,), device='gpu' if CUDA else 'cpu')
 #    fp.write(model_print)

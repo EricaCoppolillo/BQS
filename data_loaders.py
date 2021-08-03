@@ -22,8 +22,11 @@ class DataLoader:
                         gamma=None):
 
         dataset = load_dataset(file_tr)
+        if "bpr" in file_tr:
+            self.discount_idxs = {"validation": dataset["original_training_size"],
+                                  "test": dataset["original_training_size"]+dataset["original_val_size"]}
 
-        self.n_users = dataset['users']
+        self.n_users = dataset["users"]
         self.item_popularity = dataset['popularity']
         self.item_popularity_dict = dataset['popularity_dict']
 
@@ -104,9 +107,12 @@ class DataLoader:
         # checking if data have already been computed
         path = Path(file_tr)
         par_dir = path.parent.absolute()
-
-        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type
-                                             , f"decreasing_factor_{decreasing_factor}", str(seed))
+        if "bpr" in file_tr:
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type
+                                                 , f"decreasing_factor_{decreasing_factor}", str(seed))
+        else:
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type
+                                                 , f"decreasing_factor_{decreasing_factor}", str(seed))
 
         if not os.path.exists(preprocessed_data_dir):
             os.makedirs(preprocessed_data_dir)
@@ -187,8 +193,13 @@ class DataLoader:
                 return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
 
         # check if sparse matrices have already been computed
-        dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type,
-                                               f"decreasing_factor_{decreasing_factor}", str(seed))
+        if "bpr" in file_tr:
+            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", "bpr", self.model_type,
+                                                   f"decreasing_factor_{decreasing_factor}", str(seed))
+        else:
+            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type,
+                                                   f"decreasing_factor_{decreasing_factor}", str(seed))
+
         if not os.path.exists(dir_for_sparse_matrices):
             os.makedirs(dir_for_sparse_matrices)
 
@@ -1033,7 +1044,7 @@ class EnsembleDataLoaderOld:
         dataset = load_dataset(dataset_file)
 
         self.n_users = dataset['users']
-        self.item_popularity = dataset['popularity']
+        self.item_popularity = dataset['popularity_dict']["test"]
         self.thresholds = dataset['thresholds']
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
@@ -1059,22 +1070,6 @@ class EnsembleDataLoaderOld:
 
         self.max_width = -1
 
-        print('DATASET STATS ------------------------------')
-        print('users:', self.n_users)
-        print('items:', self.n_items)
-        print('low_pop:', self.low_pop)
-        print('med_pop:', self.med_pop)
-        print('high_pop:', self.high_pop)
-        print('thresholds:', self.thresholds)
-        print('max_popularity:', self.max_popularity)
-        print('min_popularity:', self.min_popularity)
-        print('max_frequency:', max(self.frequencies))
-        print('min_frequency:', min(self.frequencies))
-        print('num(max_popularity):', sum(self.item_popularity == self.max_popularity))
-        print('num(min_popularity):', sum(self.item_popularity == self.min_popularity))
-        print('sorted(self.sorted_item_popularity)[:100]:', sorted(self.sorted_item_popularity[:10]))
-        print('sorted(self.sorted_item_popularity)[-100:]:', sorted(self.sorted_item_popularity[-10:]))
-        print('sorted(frequencies):', sorted(self.frequencies)[:10])
 
         # loading models
         print('Loading ensemble models...')

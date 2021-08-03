@@ -1,7 +1,7 @@
 {
-  "CUDA_VISIBLE_DEVICES": "1",
-    "dataset_name": "datasets.CITEULIKE",
-    "model_type": "model_types.REWEIGHTING",
+  "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.NETFLIX",
+    "model_type": "model_types.BASELINE",
     "copy_pasting_data": "True",
 
     "alpha": 0.5,
