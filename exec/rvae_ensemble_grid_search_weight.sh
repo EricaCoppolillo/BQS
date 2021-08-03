@@ -3,15 +3,13 @@ cuda="0"
 # moving in the parent directory
 cd $(dirname $0)/../
 
+# NETFLIX 0.25 0.05 0.4
+
 DATASETS="CITEULIKE 0.2 0.05 0.7
 MOVIELENS_1M 0.2 0.05 0.7
 PINTEREST 0.5 0.05 0.8
 EPINIONS 0.3 0.05 0.45
 MOVIELENS_20M 2.0 0.1 3.0
-NETFLIX 0.25 0.05 0.4
-"
-
-DATASETS="NETFLIX 0.25 0.05 0.4
 "
 
 # iterating across datasets

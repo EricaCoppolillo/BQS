@@ -189,6 +189,14 @@ class EnsembleMultiVAE(nn.Module):
         # self.filter_a = torch.tensor(np.array(self.popularity) > self.thresholds[0]).to(device).float()  # baseline
         # self.filter_b = torch.tensor(np.array(self.popularity) <= self.thresholds[0]).to(device).float()  # low
 
+        # low
+        # self.mask = torch.tensor(np.array(self.popularity) <= self.thresholds[0], dtype=torch.int8)
+
+    # def to(self, device):
+    #     model = super().to(device)
+    #     model.mask = model.mask.to(device)
+    #     return model
+
     def normalize(self, tensor):
         min_v = torch.min(tensor)
         range_v = torch.max(tensor) - min_v
@@ -221,13 +229,18 @@ class EnsembleMultiVAE(nn.Module):
         #     print('-------------------------------------------------------------------')
         #     self.test_print = False
 
-        baseline = False
+        # baseline = False
 
-        if baseline:
-            y_e = z_a
-        else:
-            # y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
-            y_e = z_a + z_b * self.gamma
+        # if baseline:
+        #     y_e = z_a
+        # else:
+        #     # y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
+
+        y_e = z_a + z_b * self.gamma
+
+        # y_e = (1-self.mask) * z_a + self.mask * z_b * self.gamma
+
+        # y_e = z_a + self.mask * z_b * self.gamma
 
         return y_e
 

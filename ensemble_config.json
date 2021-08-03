@@ -1,10 +1,10 @@
 {
-  "CUDA_VISIBLE_DEVICES": "0",
-  "dataset_name": "datasets.MOVIELENS_1M",
+  "CUDA_VISIBLE_DEVICES": "2",
+  "dataset_name": "datasets.PINTEREST",
   "model_type": "simple",
   "n_epochs": 10,
+  "ensemble_weight": 0.75,
   "batch_size": 1024,
-  "ensemble_weight": 0.3,
   "weight_decay": 0.0,
   "learning_rate": 1e-3,
   "total_anneal_steps": 200000,
