@@ -184,7 +184,8 @@ class EnsembleMultiVAE(nn.Module):
         if baseline:
             y_e = z_a
         else:
-            # y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
+            # y_e = z_a * self.filter_a + z_b * self.filter_b * self.gamma
+            # y_e = z_a + z_b * self.filter_b * self.gamma
             y_e = z_a + z_b * self.gamma
 
         return y_e
