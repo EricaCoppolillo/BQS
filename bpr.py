@@ -448,7 +448,7 @@ plt.savefig(os.path.join(run_dir, 'hr.png'));
 plt.savefig(os.path.join(run_dir, 'hr.pdf'));
 
 if copy_pasting_data:
-    main_directory = os.path.join('./data', dataset_name, model_type)
+    main_directory = os.path.join('./data', dataset_name, "bpr", model_type)
     # deleting the main directory used by the ensemble script
     import shutil
     if os.path.isdir(main_directory):
