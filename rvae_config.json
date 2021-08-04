@@ -1,11 +1,11 @@
 {
   "CUDA_VISIBLE_DEVICES": "2",
     "dataset_name": "datasets.NETFLIX",
-    "model_type": "model_types.BASELINE",
+    "model_type": "model_types.REWEIGHTING",
     "copy_pasting_data": "True",
 
-    "alpha": 0.5,
-    "gamma": 6.67,
+    "alpha": 0.0005,
+    "gamma": 10,
     "n_epochs": 50,
     "batch_size": 1024,
     "weight_decay": 0.0,
@@ -23,7 +23,7 @@
     "scale": 1000,
     "use_popularity": "True",
     "p_dims": "[200, 600]",
-    "decreasing_factor": 1,
+    "decreasing_factor": 500,
     "best_model_k_metric": 10,
     "cached_dataloader": "False",
     "seed": 12121995
