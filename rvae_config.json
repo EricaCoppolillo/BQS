@@ -1,11 +1,9 @@
 {
-  "CUDA_VISIBLE_DEVICES": "2",
-    "dataset_name": "datasets.NETFLIX",
+  "CUDA_VISIBLE_DEVICES": "1",
+    "dataset_name": "datasets.MOVIELENS_1M",
     "model_type": "model_types.BASELINE",
-    "copy_pasting_data": "True",
+    "copy_pasting_data": "False",
 
-    "alpha": 0.5,
-    "gamma": 6.67,
     "n_epochs": 50,
     "batch_size": 1024,
     "weight_decay": 0.0,

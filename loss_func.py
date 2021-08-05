@@ -178,6 +178,18 @@ class rvae_rank_pair_loss(rvae_loss):
         return neg_ll
 
 
+class vae_loss(rvae_loss):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.bce = torch.nn.BCEWithLogitsLoss()
+
+    def log_p(self, x, y, **kwargs):
+
+        neg_ll = self.bce(y, x)
+        return neg_ll
+
+
 class ensemble_rvae_rank_pair_loss(rvae_loss):
     def __init__(self, **kargs):
         super(ensemble_rvae_rank_pair_loss, self).__init__(**kargs)

@@ -57,6 +57,7 @@ class DataLoader:
             assert self.beta > 0, self.absolute_thresholds
             self.gamma = gamma
             self.alpha = alpha
+            assert alpha > 0 and gamma > 0, alpha
 
         self.n_items = len(self.item_popularity)
         self.use_popularity = self.model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
@@ -620,6 +621,7 @@ class CachedDataLoader(DataLoader):
             assert self.beta > 0, self.absolute_thresholds
             self.gamma = gamma
             self.alpha = alpha
+            assert alpha > 0 and gamma > 0, alpha
 
         self.sorted_item_popularity = sorted(self.item_popularity)
         limit = 1
