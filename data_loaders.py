@@ -3,7 +3,8 @@ import gc
 import json
 
 from tqdm import tqdm
-from math import ceil, modf
+from math import ceil, modf, floor
+import scipy.stats as ss
 from scipy.sparse import csr_matrix, vstack
 from scipy.sparse import save_npz, load_npz
 from pathlib import Path
@@ -15,6 +16,26 @@ from config import Config
 
 model_types = Config("./model_type_info.json")
 
+def rank_simple(vector):
+    return sorted(range(len(vector)), key=vector.__getitem__, reverse=True)
+
+def rankdata(a):
+    n = len(a)
+    ivec=rank_simple(a)
+    svec=[a[rank] for rank in ivec]
+    sumranks = 0
+    dupcount = 0
+    newarray = [0]*n
+    for i in range(n):
+        sumranks += i
+        dupcount += 1
+        if i==n-1 or svec[i] != svec[i+1]:
+            averank = sumranks / float(dupcount) + 1
+            for j in range(i-dupcount+1,i+1):
+                newarray[ivec[j]] = averank
+            sumranks = 0
+            dupcount = 0
+    return newarray
 
 class DataLoader:
     def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100, alpha=None,
@@ -75,12 +96,17 @@ class DataLoader:
             frequencies = []
             freq_decimal_part = []
             item_popularity = self.item_popularity_dict[split_type]
+            # computing item ranking
+            item_ranking = rankdata(item_popularity)
             max_popularity = max(item_popularity)
             nusers = self.n_users_dict[split_type]
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
+                # d_i = ceil(np.log2(ceil((item_ranking[idx] / self.high_pop) + 1) + 1))
+                d_i = ceil((item_ranking[idx]/self.high_pop) + 1)
+                # d_i = self.decreasing_factor
                 if f_i > 0:
-                    n_i_decimal, n_int = modf(n * (max_popularity / (self.decreasing_factor * f_i)))
+                    n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
                     frequencies.append(int(n_int))
                     freq_decimal_part.append(n_i_decimal)
                 else:
