@@ -2,9 +2,9 @@ import time
 
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
-from data_loaders import EnsembleDataLoader, EnsembleDataLoaderOld
-from models import EnsembleMultiVAE, EnsembleMultiVAETrainable
-from loss_func import ensemble_rvae_rank_pair_loss
+from data_loaders import EnsembleDataLoader
+from models import EnsembleMultiVAE, EnsembleMultiVAETrainable, EnsembleMultiVAENet
+from loss_func import ensemble_rvae_rank_pair_loss, ensemble_rvae_focal_loss
 from config import Config
 import torch
 import numpy as np
@@ -74,19 +74,15 @@ In test the data is reported with 3 masks of items with less, middle and top pop
 """
 
 # Dataloader
-if config.model_type == 'trainable':
-    trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                     device=device)
-else:
-    trainloader = EnsembleDataLoaderOld(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                     device=device)
+trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                 device=device)
 
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
 thresholds = trainloader.thresholds
 popularity = trainloader.item_popularity
-frequencies = trainloader.frequencies
+frequencies = trainloader.frequencies_dict['training']
 
 max_y_aux_popularity = compute_max_y_aux_popularity(config)
 top_k = (1, 5, 10)
@@ -103,10 +99,13 @@ def evaluate(dataloader, tag='validation'):
     result['loss'] = 0
 
     with torch.no_grad():
-        for batch_idx, (x, _, _, _, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
+        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
                 dataloader.iter_test_ensemble(batch_size=config.batch_size, tag=tag, device=device)):
             x_tensor = naive_sparse2tensor(x).to(device)
+            mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
+            pos = naive_sparse2tensor(pos).to(device)
+            neg = naive_sparse2tensor(neg).to(device)
 
             batch_num += 1
             n_users_train += x_tensor.shape[0]
@@ -115,7 +114,9 @@ def evaluate(dataloader, tag='validation'):
 
             y = model(x_input, y_a, y_b)
 
-            result['loss'] += 0
+            loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
+            # print("[EVAL]: Loss computed")
+            result['loss'] += loss.item()
 
             recon_batch_cpu = y.cpu().numpy()
 
@@ -173,6 +174,7 @@ def train(dataloader, epoch, optimizer):
         loss.backward()
         optimizer.step()
 
+        print('LOSS', loss.item())
         train_loss += loss.item()
         train_loss_cumulative += loss.item()
 
@@ -303,6 +305,8 @@ update_count = 0
 
 if config.model_type == 'trainable':
     model = EnsembleMultiVAETrainable()
+elif config.model_type == 'trainable_net':
+    model = EnsembleMultiVAENet(n_items)
 else:
     model = EnsembleMultiVAE(n_items, popularity, thresholds=thresholds, gamma=config.ensemble_weight)
 
@@ -315,7 +319,7 @@ criterion = ensemble_rvae_rank_pair_loss(popularity=popularity,
 stat_metric = []
 
 # TRAIN
-if config.model_type == 'trainable':
+if config.model_type in ('trainable', 'trainable_net'):
     train_ensemble()
 
 
