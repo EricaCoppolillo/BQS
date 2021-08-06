@@ -18,7 +18,7 @@ from config import Config
 model_types = Config("./model_type_info.json")
 
 def rank_simple(vector):
-    return sorted(range(len(vector)), key=vector.__getitem__, reverse=False)
+    return sorted(range(len(vector)), key=vector.__getitem__, reverse=True)
 
 def rankdata(a):
     n = len(a)

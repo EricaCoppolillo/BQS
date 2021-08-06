@@ -1,7 +1,7 @@
 {
   "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.CITEULIKE",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.LOW",
     "copy_pasting_data": "True",
 
     "alpha": 0.0005,
