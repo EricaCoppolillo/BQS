@@ -79,7 +79,7 @@ if not config.cached_dataloader:
         trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
     else:
         trainloader = DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                 model_type=model_type, alpha=config.alpha, gamma=config.gamma)
+                                 model_type=model_type, alpha=config.alpha, gamma=config.gamma, K=config.K)
 else:
     print('USE CACHED DATALOADER')
     if model_type == model_types.BASELINE:

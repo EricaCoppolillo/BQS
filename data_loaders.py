@@ -18,7 +18,7 @@ from config import Config
 model_types = Config("./model_type_info.json")
 
 def rank_simple(vector):
-    return sorted(range(len(vector)), key=vector.__getitem__, reverse=True)
+    return sorted(range(len(vector)), key=vector.__getitem__, reverse=False)
 
 def rankdata(a):
     n = len(a)
@@ -40,7 +40,7 @@ def rankdata(a):
 
 class DataLoader:
     def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100, alpha=None,
-                        gamma=None):
+                        gamma=None, K=None):
 
         dataset = load_dataset(file_tr)
         if "bpr" in file_tr:
@@ -88,6 +88,7 @@ class DataLoader:
         self.min_popularity = self.sorted_item_popularity[0]
 
         self.decreasing_factor = decreasing_factor
+        self.K=K # luciano RVAE_S
         n = self.pos_neg_ratio
         self.frequencies_dict = {}
         self.freq_decimal_part_dict = {}
@@ -97,17 +98,36 @@ class DataLoader:
             frequencies = []
             freq_decimal_part = []
             item_popularity = self.item_popularity_dict[split_type]
+            nusers = self.n_users_dict[split_type]
             # computing item ranking
             item_ranking = rankdata(item_popularity)
+            max_ranking = max(item_ranking)
             max_popularity = max(item_popularity)
-            nusers = self.n_users_dict[split_type]
+            item_abs_popularity = self.absolute_item_popularity_dict[split_type]
+            max_abs_popularity, min_abs_popularity = max(item_abs_popularity), min(item_abs_popularity)
+            if min_abs_popularity == 0: # val&test sets
+                min_abs_popularity=1
+            min_exposure = self.K * n * min_abs_popularity
+            while nusers*max_popularity*n <= min_exposure: # max_abs_popularity*n <= min_exposure:
+                print("Reducing K parameter by a 10x order")
+                self.K /= 10
+                min_exposure = self.K * n * min_abs_popularity
+
+            # m = (max_abs_popularity*n - min_exposure)/(np.log(max_abs_popularity/min_abs_popularity))
+            # def _compute_exposure_per_user(pop_item, m=m,q=min_exposure, constant=min_abs_popularity):
+            #     return m*np.log(pop_item/constant) + q
+            m = (nusers*max_popularity*n - min_exposure)/max_ranking
+            def _compute_exposure_per_user(item_rank, m=m,q=min_exposure):
+                return m*item_rank + q
+
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
-                # d_i = ceil(np.log2(ceil((item_ranking[idx] / self.high_pop) + 1) + 1))
-                d_i = ceil((item_ranking[idx]/self.high_pop) + 1)
-                # d_i = self.decreasing_factor
+                # d_i = ceil((item_ranking[idx]/self.high_pop) + 1)
+                p_i = item_abs_popularity[idx]
+                r_i = item_ranking[idx]
                 if f_i > 0:
-                    n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    # n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    n_i_decimal, n_int = modf(_compute_exposure_per_user(r_i)/p_i)
                     frequencies.append(int(n_int))
                     freq_decimal_part.append(n_i_decimal)
                 else:
