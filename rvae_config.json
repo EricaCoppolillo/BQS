@@ -1,6 +1,6 @@
 {
-  "CUDA_VISIBLE_DEVICES": "3",
-    "dataset_name": "datasets.CITEULIKE",
+  "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.MOVIELENS_1M",
     "model_type": "model_types.LOW",
     "copy_pasting_data": "True",
 

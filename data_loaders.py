@@ -106,7 +106,11 @@ class DataLoader:
                 f_i = item_popularity[idx]
                 d_i = ceil((item_ranking[idx]/self.high_pop) + 1)
                 if f_i > 0:
-                    n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    if self.model_type == model_types.OVERSAMPLING:
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    else:
+                        d_i = self.decreasing_factor
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
                     frequencies.append(int(n_int))
                     freq_decimal_part.append(n_i_decimal)
                 else:
