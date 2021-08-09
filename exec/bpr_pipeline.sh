@@ -6,13 +6,11 @@ cuda="0"
 # moving in the parent directory
 cd $(dirname $0)/../
 
-rm -f last_log_bprpipeline.txt
-
 # iterating across datasets
 for dataset_name in "${datasets[@]}"; do
   # loading default config file - TODO: Add capability to use custom files
   echo "Currently analyzing: "$dataset_name
   cat default_bpr_configs.json | python -c "import sys, json; from util import clean_json_string; x=json.load(sys.stdin); x=x[sys.argv[1]]; x['CUDA_VISIBLE_DEVICES']=sys.argv[2]; print(clean_json_string(str(x)))" $dataset_name $cuda > bpr_config.json
   # running the LOW model training
-  python bpr.py 2>&1 | tee -a last_log_bprpipeline.txt
+  python -u bpr.py
 done
