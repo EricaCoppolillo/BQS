@@ -31,11 +31,11 @@ config.cached_dataloader = eval(config.cached_dataloader if 'cached_dataloader' 
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
-config.alpha = float(config.get('alpha', -1))
-config.gamma = float(config.get('gamma', -1))
-if config.alpha<0 or config.gamma < 0:
-    config.alpha=None
-    config.gamma=None
+config.alpha = float(config.__dict__.get('alpha', -1))
+config.gamma = float(config.__dict__.get('gamma', -1))
+if model_type == "reweighting":
+    assert config.alpha > 0 and config.gamma > 0, config.alpha
+
 # ---------------------------------------------------
 
 # set seed for experiment reproducibility
@@ -193,6 +193,8 @@ def evaluate(dataloader, popularity, tag='validation'):
             #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
             loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
             # print("[EVAL]: Loss computed")
+            if np.isinf(loss.item()):
+                print("Val Loss inf")
             result['loss'] += loss.item()
 
             recon_batch_cpu = y.cpu().numpy()
@@ -278,6 +280,8 @@ try:
         LOW, MED, HIGH = 0, 1, 2
         if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
             val_result = result["loss"]
+            if np.isinf(val_result) or np.isnan(val_result):
+                val_result = -float(result[f"luciano_stat@{config.best_model_k_metric}"])
         # in the following elif blocks, the value is multiplied by -1 to invert the objective (minimizing instead of
         # maximizing)
         elif model_type == model_types.LOW:

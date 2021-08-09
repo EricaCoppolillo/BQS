@@ -210,6 +210,7 @@ class EnsembleMultiVAE(nn.Module):
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
 
+
         # if self.test_print:
         #     print('ENSEMBLE TEST PRINT (train) ---------------------------------------')
         #     print('Shape x, x[0]:', len(x), len(x[0]))
@@ -241,7 +242,7 @@ class EnsembleMultiVAE(nn.Module):
         # y_e = (1-self.mask) * z_a + self.mask * z_b * self.gamma
 
         # y_e = z_a + self.mask * z_b * self.gamma
-
+        
         return y_e
 
     def init_weights(self):

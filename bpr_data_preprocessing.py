@@ -1,6 +1,5 @@
 import os
 import pickle
-import copy
 import tqdm
 
 base_dir = "./"
