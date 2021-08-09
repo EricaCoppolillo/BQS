@@ -172,6 +172,16 @@ class DataLoader:
             with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'rb') as f:
                 self.max_width = pickle.load(f)
 
+        # save item exposure and popularity
+        if "bpr" in file_tr:
+            base_path = file_tr[:-9]
+        else:
+            base_path = file_tr[:-10]
+        with open(os.path.join(base_path, "item_pop.pkl"), 'wb') as handle:
+            pickle.dump(self.absolute_item_popularity_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open(os.path.join(base_path, "item_exposure.pkl"), 'wb') as handle:
+            pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
         print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
 
         def _converting_to_csr_matrix(x, input_shape, desc):
@@ -573,7 +583,7 @@ class CachedDataLoader(DataLoader):
         self.size = {}
 
         self._db = sqlite3.connect(cache_file)
-
+        self.file_tr = file_tr
         if init_db:
             dataset = load_dataset(file_tr)
             self._init_cache(dataset, decreasing_factor, alpha, gamma)
@@ -667,12 +677,20 @@ class CachedDataLoader(DataLoader):
             frequencies = []
             freq_decimal_part = []
             item_popularity = self.item_popularity_dict[split_type]
-            max_popularity = max(item_popularity)
             nusers = self.n_users_dict[split_type]
+            # computing item ranking
+            item_ranking = rankdata(item_popularity)
+            max_popularity = max(item_popularity)
+
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
+                d_i = ceil((item_ranking[idx] / self.high_pop) + 1) if "ml-20m" not in self.file_tr else ceil((item_ranking[idx] / (2*self.high_pop)) + 1)
                 if f_i > 0:
-                    n_i_decimal, n_int = modf(n * (max_popularity / (self.decreasing_factor * f_i)))
+                    if self.model_type == model_types.OVERSAMPLING:
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    else:
+                        d_i = self.decreasing_factor
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
                     frequencies.append(int(n_int))
                     freq_decimal_part.append(n_i_decimal)
                 else:
