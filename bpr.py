@@ -7,10 +7,9 @@ import time
 import torch
 import numpy as np
 import json
-import pickle
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
-from models import BPR_MF, BPR
+from models import BPR
 from loss_func import bpr_rank_pair_loss
 from data_loaders import DataLoader, CachedDataLoader
 from config import Config
