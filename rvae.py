@@ -98,7 +98,6 @@ frequencies = trainloader.frequencies_dict["training"]
 
 max_y_aux_popularity = compute_max_y_aux_popularity(config)
 
-
 def train(dataloader, epoch, optimizer):
     global update_count
 

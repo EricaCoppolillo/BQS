@@ -176,10 +176,16 @@ class DataLoader:
             base_path = file_tr[:-9]
         else:
             base_path = file_tr[:-10]
-        with open(os.path.join(base_path, "item_pop.pkl"), 'wb') as handle:
-            pickle.dump(self.absolute_item_popularity_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open(os.path.join(base_path, "item_exposure.pkl"), 'wb') as handle:
-            pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if not os.path.exists(os.path.join(base_path, "item_pop.pkl")):
+            with open(os.path.join(base_path, "item_pop.pkl"), 'wb') as handle:
+                pickle.dump(self.absolute_item_popularity_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if self.model_type==model_types.BASELINE:
+            add_term="_B"
+        else:
+            add_term=""
+        if not os.path.exists(os.path.join(base_path, f"item_exposure{add_term}.pkl")):
+            with open(os.path.join(base_path, f"item_exposure{add_term}.pkl"), 'wb') as handle:
+                pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
 
@@ -565,6 +571,7 @@ class CachedDataLoader(DataLoader):
 
         :param clean_cache: if True rebuild cache from scratch
         """
+
         self.use_popularity = model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
                                                   model_types.OVERSAMPLING)
 
@@ -912,7 +919,7 @@ CREATE TABLE testset (
 
         return mask_rank
 
-    def iter(self, batch_size=256, tag='train'):
+    def iter(self, batch_size=256, tag='train', model_type="rvae"):
         """
         Iter on data
 
@@ -962,11 +969,15 @@ CREATE TABLE testset (
             mask = self.creating_csr_mask(mask, (x.shape[0], max_column)).A
             pos = vstack(pos).A
             neg = vstack(neg).A
-            yield x, pos, neg, mask
+
+            if model_type=="rvae":
+                yield x, pos, neg, mask
+            else:
+                yield x, pos, neg, mask, raw_idxs
 
         cur.close()
 
-    def iter_test(self, batch_size=256, tag='test'):
+    def iter_test(self, batch_size=256, tag='test', model_type="bpr"):
         """
         Iter on data
 
@@ -1022,7 +1033,10 @@ CREATE TABLE testset (
             # neg_te is list
             mask_te = self._generate_mask_te(pos_te)
 
-            yield x, pos, neg, mask, pos_te, neg_te, mask_te
+            if model_type=="rvae":
+                yield x, pos, neg, mask, pos_te, neg_te, mask_te
+            else:
+                yield x, pos, neg, mask, pos_te, neg_te, mask_te, raw_idxs
 
         cur.close()
 

@@ -1,5 +1,5 @@
 {
-  "CUDA_VISIBLE_DEVICES": "2",
+  "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.MOVIELENS_20M",
     "model_type": "model_types.OVERSAMPLING",
     "copy_pasting_data": "True",
