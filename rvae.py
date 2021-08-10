@@ -11,7 +11,7 @@ import pickle
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from models import MultiVAE
-from loss_func import rvae_rank_pair_loss
+from loss_func import rvae_rank_pair_loss, vae_loss
 from data_loaders import DataLoader, CachedDataLoader
 from config import Config
 
@@ -229,6 +229,8 @@ criterion = rvae_rank_pair_loss(device=device, popularity=popularity if model_ty
                                 thresholds=thresholds,
                                 frequencies=frequencies)
 # criterion = rvae_focal_loss(popularity=popularity if settings.use_popularity else None, scale=settings.scale)
+
+# criterion = vae_loss()
 
 best_loss = np.Inf
 

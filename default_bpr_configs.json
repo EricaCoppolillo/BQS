@@ -2,7 +2,7 @@
   "MOVIELENS_1M": {
     "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.MOVIELENS_1M",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.REWEIGHTING",
     "copy_pasting_data": "True",
 
     "alpha": 0.01,
@@ -33,7 +33,7 @@
   "MOVIELENS_20M": {
     "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.MOVIELENS_20M",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.REWEIGHTING",
     "copy_pasting_data": "True",
 
     "alpha": 0.0025,
@@ -64,7 +64,7 @@
   "CITEULIKE": {
     "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.CITEULIKE",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.REWEIGHTING",
     "copy_pasting_data": "True",
 
     "alpha": 0.5,
@@ -95,7 +95,7 @@
   "PINTEREST": {
     "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.PINTEREST",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.REWEIGHTING",
     "copy_pasting_data": "True",
 
     "alpha": 0.05,
@@ -126,7 +126,7 @@
   "EPINIONS": {
     "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.EPINIONS",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.REWEIGHTING",
     "copy_pasting_data": "True",
 
     "alpha": 0.1,
@@ -157,7 +157,7 @@
   "NETFLIX": {
     "CUDA_VISIBLE_DEVICES": "3",
     "dataset_name": "datasets.NETFLIX",
-    "model_type": "model_types.OVERSAMPLING",
+    "model_type": "model_types.REWEIGHTING",
     "copy_pasting_data": "True",
 
     "alpha": 0.01,

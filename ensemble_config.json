@@ -1,10 +1,10 @@
 {
-  "CUDA_VISIBLE_DEVICES": "2",
-  "dataset_name": "datasets.PINTEREST",
+  "CUDA_VISIBLE_DEVICES": "0",
+  "dataset_name": "datasets.NETFLIX",
   "model_type": "simple",
   "n_epochs": 10,
-  "ensemble_weight": 0.75,
-  "batch_size": 1024,
+  "ensemble_weight": 0.4,
+  "batch_size": 256,
   "weight_decay": 0.0,
   "learning_rate": 1e-3,
   "total_anneal_steps": 200000,
@@ -20,6 +20,6 @@
   "scale": 1000,
   "use_popularity": "True",
   "p_dims": "[200, 600]",
-  "decreasing_factor": 1,
+  "decreasing_factor": 500,
   "seed": 8734
 }

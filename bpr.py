@@ -29,8 +29,8 @@ copy_pasting_data = eval(config.copy_pasting_data)
 config.cached_dataloader = eval(config.cached_dataloader if 'cached_dataloader' in config else 'False')
 config.metrics_scale = eval(config.metrics_scale)
 config.latent_dim = eval(config.latent_dim)
-config.alpha = float(config.__dict__.get('alpha', -1))
-config.gamma = float(config.__dict__.get('gamma', -1))
+config.alpha = float(config.alpha)
+config.gamma = float(config.gamma)
 if model_type == "reweighting":
     assert config.alpha > 0 and config.gamma > 0, config.alpha
 # ---------------------------------------------------
