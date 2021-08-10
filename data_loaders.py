@@ -194,8 +194,6 @@ class DataLoader:
             with open(os.path.join(base_path, f"item_exposure{add_term}.pkl"), 'wb') as handle:
                 pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        import sys
-        sys.exit(-1)
         print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
 
         def _converting_to_csr_matrix(x, input_shape, desc):
