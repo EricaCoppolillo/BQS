@@ -43,6 +43,7 @@ class DataLoader:
                         gamma=None):
 
         dataset = load_dataset(file_tr)
+        self.file_tr=file_tr
         if "bpr" in file_tr:
             self.discount_idxs = {"validation": dataset["original_training_size"],
                                   "test": dataset["original_training_size"]+dataset["original_val_size"]}
@@ -105,7 +106,12 @@ class DataLoader:
 
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
-                d_i = ceil((item_ranking[idx]/self.high_pop) + 1)
+                h = 1
+                if "ml-20m" in self.file_tr:
+                    h=0.12
+                if "netflix" in self.file_tr:
+                    h=0.12
+                d_i = ceil((item_ranking[idx] / (self.high_pop*h)) + 1)
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
@@ -188,6 +194,8 @@ class DataLoader:
             with open(os.path.join(base_path, f"item_exposure{add_term}.pkl"), 'wb') as handle:
                 pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
+        import sys
+        sys.exit(-1)
         print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
 
         def _converting_to_csr_matrix(x, input_shape, desc):
@@ -689,9 +697,14 @@ class CachedDataLoader(DataLoader):
             item_ranking = rankdata(item_popularity)
             max_popularity = max(item_popularity)
 
+            h=1
+            if "ml-20m" in self.file_tr:
+                h=0.12
+            if "netflix" in self.file_tr:
+                h=0.12
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
-                d_i = ceil((item_ranking[idx] / self.high_pop) + 1) if "ml-20m" not in self.file_tr else ceil((item_ranking[idx] / (2*self.high_pop)) + 1)
+                d_i = ceil((item_ranking[idx] / (h*self.high_pop)) + 1)
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
