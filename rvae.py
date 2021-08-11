@@ -388,6 +388,8 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
 
     fp.write(f"Average_Exposure = {np.mean(trainloader.item_visibility_dict['training'])}")
     fp.write(f"Std_Exposure = {np.std(trainloader.item_visibility_dict['training'])}")
+    if model_type==model_types.OVERSAMPLING:
+        fp.write(f"Multiplier for oversampling formula = {trainloader.h}")
 #    fp.write('\n' * 4)
 #    model_print, _ = torchsummary.summary_string(model, (dataloader.n_items,), device='gpu' if CUDA else 'cpu')
 #    fp.write(model_print)

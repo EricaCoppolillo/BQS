@@ -103,14 +103,16 @@ class DataLoader:
             # computing item ranking
             item_ranking = rankdata(item_popularity)
             max_popularity = max(item_popularity)
+            h = 1
+            if "ml-20m" in self.file_tr:
+                h = 0.12
+            if "netflix" in self.file_tr:
+                h = 0.04
+            self.h=h
 
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
-                h = 1
-                if "ml-20m" in self.file_tr:
-                    h=0.12
-                if "netflix" in self.file_tr:
-                    h=0.12
+
                 d_i = ceil((item_ranking[idx] / (self.high_pop*h)) + 1)
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
@@ -695,11 +697,12 @@ class CachedDataLoader(DataLoader):
             item_ranking = rankdata(item_popularity)
             max_popularity = max(item_popularity)
 
-            h=1
+            h = 1
             if "ml-20m" in self.file_tr:
-                h=0.12
+                h = 0.12
             if "netflix" in self.file_tr:
-                h=0.12
+                h = 0.04
+            self.h = h
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
                 d_i = ceil((item_ranking[idx] / (h*self.high_pop)) + 1)
@@ -990,7 +993,7 @@ CREATE TABLE testset (
 
         cur.close()
 
-    def iter_test(self, batch_size=256, tag='test', model_type="bpr"):
+    def iter_test(self, batch_size=256, tag='test', model_type="rvae"):
         """
         Iter on data
 

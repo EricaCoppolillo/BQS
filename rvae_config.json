@@ -1,6 +1,6 @@
 {
-  "CUDA_VISIBLE_DEVICES": "1",
-    "dataset_name": "datasets.MOVIELENS_20M",
+  "CUDA_VISIBLE_DEVICES": "3",
+    "dataset_name": "datasets.NETFLIX",
     "model_type": "model_types.OVERSAMPLING",
     "copy_pasting_data": "True",
 
@@ -25,6 +25,6 @@
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
     "best_model_k_metric": 10,
-    "cached_dataloader": "True",
+    "cached_dataloader": "False",
     "seed": 12121995
 }
