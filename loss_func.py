@@ -28,10 +28,10 @@ class bpr_loss(nn.Module):
         weight = mask
         return weight
 
-
     def forward(self, x, y, **args):
         n_llk = self.log_p(x, y, **args)
         return n_llk
+
 
 class bpr_rank_pair_loss(bpr_loss):
     def __init__(self, device, **kargs):
@@ -47,7 +47,6 @@ class bpr_rank_pair_loss(bpr_loss):
             mask = mask > 0
         else:
             weight = mask
-
 
         y1 = torch.gather(y, 1, pos_items.long()) * mask
         y2 = torch.gather(y, 1, neg_items.long()) * mask
@@ -72,6 +71,7 @@ class bpr_rank_pair_loss(bpr_loss):
 
         torch.cuda.empty_cache()
         return neg_ll
+
 
 class rvae_loss(nn.Module):
     def __init__(self, popularity=None, scale=1., beta=1., thresholds=None, frequencies=None, device="cpu"):
@@ -106,7 +106,7 @@ class rvae_loss(nn.Module):
         return KLD
 
     def forward(self, x, y, mu, logvar, anneal, **args):
-        n_llk = self.log_p(x, y, **args)
+        n_llk = torch.sum(self.log_p(x, y, **args))
         loss = n_llk + anneal * self.kld(mu, logvar)
 
         return loss
@@ -151,7 +151,6 @@ class rvae_rank_pair_loss(rvae_loss):
         else:
             weight = mask
 
-
         y1 = torch.gather(y, 1, pos_items.long()) * mask
         y2 = torch.gather(y, 1, neg_items.long()) * mask
 
@@ -168,9 +167,9 @@ class rvae_rank_pair_loss(rvae_loss):
 
         if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
             # assert mask.sum() > 0
-            neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
+            neg_ll = - (self.logsigmoid(y1 - y2) * weight) / mask.sum()
         else:
-            neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+            neg_ll = - (filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
             del pop_pos
             del filter_pos
 
@@ -185,7 +184,6 @@ class vae_loss(rvae_loss):
         self.bce = torch.nn.BCEWithLogitsLoss()
 
     def log_p(self, x, y, **kwargs):
-
         neg_ll = self.bce(y, x)
         return neg_ll
 
@@ -276,3 +274,5 @@ class ensemble_rvae_focal_loss(ensemble_rvae_loss):
         neg_ll = - w * self.logsigmoid(y1 - y2) * mask
         neg_ll = torch.sum(neg_ll) / mask.sum()
         return neg_ll
+
+

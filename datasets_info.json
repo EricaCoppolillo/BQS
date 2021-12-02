@@ -5,5 +5,7 @@
   "MOVIELENS_20M":"ml-20m",
   "NETFLIX":"netflix",
   "NETFLIX_SAMPLE":"netflix_sample",
-  "PINTEREST":"pinterest"
+  "PINTEREST":"pinterest",
+  "YAHOO": "yahoo-r3",
+  "PROD": "LFR_benchmark"
 }

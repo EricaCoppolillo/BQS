@@ -1,15 +1,12 @@
-import itertools
 import os
 import gc
-import json
 
 from tqdm import tqdm
 from math import ceil, modf, floor
-import scipy.stats as ss
+from scipy.stats import norm
 from scipy.sparse import csr_matrix, vstack
 from scipy.sparse import save_npz, load_npz
 from pathlib import Path
-import pickle
 import sqlite3
 from util import *
 from models import *
@@ -17,36 +14,44 @@ from config import Config
 
 model_types = Config("./model_type_info.json")
 
+
 def rank_simple(vector):
     return sorted(range(len(vector)), key=vector.__getitem__, reverse=True)
 
+
 def rankdata(a):
     n = len(a)
-    ivec=rank_simple(a)
-    svec=[a[rank] for rank in ivec]
+    ivec = rank_simple(a)
+    svec = [a[rank] for rank in ivec]
     sumranks = 0
     dupcount = 0
-    newarray = [0]*n
+    newarray = [0] * n
     for i in range(n):
         sumranks += i
         dupcount += 1
-        if i==n-1 or svec[i] != svec[i+1]:
+        if i == n - 1 or svec[i] != svec[i + 1]:
             averank = sumranks / float(dupcount) + 1
-            for j in range(i-dupcount+1,i+1):
+            for j in range(i - dupcount + 1, i + 1):
                 newarray[ivec[j]] = averank
             sumranks = 0
             dupcount = 0
     return newarray
 
+
 class DataLoader:
     def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100, alpha=None,
-                        gamma=None):
-
+                 gamma=None):
+        try:
+            print(self.submodel_type)
+        except:
+            self.submodel_type = ""
         dataset = load_dataset(file_tr)
-        self.file_tr=file_tr
+        if "contamination" in dataset:
+            self.contamination = dataset["contamination"]
+        self.file_tr = file_tr
         if "bpr" in file_tr:
             self.discount_idxs = {"validation": dataset["original_training_size"],
-                                  "test": dataset["original_training_size"]+dataset["original_val_size"]}
+                                  "test": dataset["original_training_size"] + dataset["original_val_size"]}
 
         self.n_users = dataset["users"]
         self.item_popularity = dataset['popularity']
@@ -56,10 +61,10 @@ class DataLoader:
                              "test": len(dataset["test_data"])}
         self.absolute_item_popularity_dict = {split_type: [elem * self.n_users_dict[split_type]
                                                            for elem in dataset['popularity_dict'][split_type]]
-                                                            for split_type in dataset['popularity_dict']
+                                              for split_type in dataset['popularity_dict']
                                               }
         self.thresholds = dataset['thresholds']
-        self.absolute_thresholds = list(map(lambda x:x*self.n_users_dict["training"], self.thresholds))
+        self.absolute_thresholds = list(map(lambda x: x * self.n_users_dict["training"], self.thresholds))
 
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
@@ -67,7 +72,8 @@ class DataLoader:
 
         # IMPROVEMENT
         self.low_pop = len([i for i in self.item_popularity_dict["training"] if i <= self.thresholds[0]])
-        self.med_pop = len([i for i in self.item_popularity_dict["training"] if self.thresholds[0] < i <= self.thresholds[1]])
+        self.med_pop = len(
+            [i for i in self.item_popularity_dict["training"] if self.thresholds[0] < i <= self.thresholds[1]])
         self.high_pop = len([i for i in self.item_popularity_dict["training"] if self.thresholds[1] < i])
 
         # compute the Beta parameter according to the item popularity
@@ -75,11 +81,12 @@ class DataLoader:
             self.absolute_item_popularity = np.array(self.absolute_item_popularity_dict["training"])
             # Beta is defined as the average popularity of the medium-popular class of items
             self.beta = self.absolute_item_popularity[(self.absolute_item_popularity >= self.absolute_thresholds[0]) &
-                                                 (self.absolute_item_popularity < self.absolute_thresholds[1])].mean()
+                                                      (self.absolute_item_popularity < self.absolute_thresholds[
+                                                          1])].mean()
             assert self.beta > 0, self.absolute_thresholds
             self.gamma = gamma
             self.alpha = alpha
-            assert alpha > 0 and gamma > 0, alpha
+            assert (not alpha or not gamma) or (alpha > 0 and gamma > 0), alpha
 
         self.n_items = len(self.item_popularity)
         self.use_popularity = self.model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
@@ -107,13 +114,13 @@ class DataLoader:
             if "ml-20m" in self.file_tr:
                 h = 0.12
             if "netflix" in self.file_tr:
-                h = 0.04
-            self.h=h
+                h = 0.14
+            self.h = h
 
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
 
-                d_i = ceil((item_ranking[idx] / (self.high_pop*h)) + 1)
+                d_i = ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
@@ -125,20 +132,19 @@ class DataLoader:
                 else:
                     frequencies.append(0)
                     freq_decimal_part.append(0)
-            counter_for_decimal_part = [int(int(item_popularity[idx]*nusers)*freq_decimal_part[idx]) for idx in range(len(item_popularity))] # K_i
-            slots_available_for_decimal_part = [int(f_i*nusers) for f_i in item_popularity] # K
+            counter_for_decimal_part = [int(int(item_popularity[idx] * nusers) * freq_decimal_part[idx]) for idx in
+                                        range(len(item_popularity))]  # K_i
+            slots_available_for_decimal_part = [int(f_i * nusers) for f_i in item_popularity]  # K
 
             self.frequencies_dict[split_type] = frequencies
             self.freq_decimal_part_dict[split_type] = freq_decimal_part
             self.counter_for_decimal_part_dict[split_type] = counter_for_decimal_part
             self.slots_available_for_decimal_part_dict[split_type] = slots_available_for_decimal_part
 
-        self.item_visibility_dict = {split_type: [0]*len(self.item_popularity_dict[split_type])
-                                for split_type in ["training", "validation", "test"]}
-
+        self.item_visibility_dict = {split_type: [0] * len(self.item_popularity_dict[split_type])
+                                     for split_type in ["training", "validation", "test"]}
 
         self.max_width = -1
-
 
         print('phase 1: Loading data...')
         self._initialize()
@@ -146,10 +152,10 @@ class DataLoader:
         path = Path(file_tr)
         par_dir = path.parent.absolute()
         if "bpr" in file_tr:
-            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type + self.submodel_type
                                                  , f"decreasing_factor_{decreasing_factor}", str(seed))
         else:
-            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type + self.submodel_type
                                                  , f"decreasing_factor_{decreasing_factor}", str(seed))
 
         if not os.path.exists(preprocessed_data_dir):
@@ -180,20 +186,15 @@ class DataLoader:
             with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'rb') as f:
                 self.max_width = pickle.load(f)
 
-        # save item exposure and popularity
-        if "bpr" in file_tr:
-            base_path = file_tr[:-9]
-        else:
-            base_path = file_tr[:-10]
-        if not os.path.exists(os.path.join(base_path, "item_pop.pkl")):
-            with open(os.path.join(base_path, "item_pop.pkl"), 'wb') as handle:
+        if not os.path.exists(os.path.join(par_dir, "item_pop.pkl")):
+            with open(os.path.join(par_dir, "item_pop.pkl"), 'wb') as handle:
                 pickle.dump(self.absolute_item_popularity_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        if self.model_type==model_types.BASELINE:
-            add_term="_B"
+        if self.model_type == model_types.BASELINE:
+            add_term = "_B"
         else:
-            add_term=""
-        if not os.path.exists(os.path.join(base_path, f"item_exposure{add_term}.pkl")):
-            with open(os.path.join(base_path, f"item_exposure{add_term}.pkl"), 'wb') as handle:
+            add_term = ""
+        if not os.path.exists(os.path.join(par_dir, f"item_exposure{add_term}.pkl")):
+            with open(os.path.join(par_dir, f"item_exposure{add_term}.pkl"), 'wb') as handle:
                 pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
@@ -209,7 +210,6 @@ class DataLoader:
                     vals.append(elem[j])
             return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.int32)
 
-
         if model_type == model_types.REWEIGHTING:
             def _creating_csr_mask(x, input_shape, desc):
                 print("Currently using masks with reweighting")
@@ -219,13 +219,15 @@ class DataLoader:
 
                 if self.alpha is not None:
                     def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
-                        return (_gamma+1)*((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
-                                            _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1))
+                        return (_gamma + 1) * ((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
+                                _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1))
 
                     w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
                            for elem in self.absolute_item_popularity]
                 else:
-                    w_i = [1/elem for elem in self.absolute_item_popularity]
+                    pop = self.item_popularity_dict["training"]
+                    # pop = self.absolute_item_popularity
+                    w_i = [1 / elem if elem > 0 else 1 for elem in pop]
 
                 for i, elem in tqdm(enumerate(x), desc=desc):
                     for j in range(len(elem)):
@@ -248,10 +250,10 @@ class DataLoader:
 
         # check if sparse matrices have already been computed
         if "bpr" in file_tr:
-            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", "bpr", self.model_type,
+            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", "bpr", self.model_type + self.submodel_type,
                                                    f"decreasing_factor_{decreasing_factor}", str(seed))
         else:
-            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type,
+            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type + self.submodel_type,
                                                    f"decreasing_factor_{decreasing_factor}", str(seed))
 
         if not os.path.exists(dir_for_sparse_matrices):
@@ -442,7 +444,8 @@ class DataLoader:
             else:
                 frequency = self.pos_neg_ratio
             if self.counter_for_decimal_part_dict[tag][item] > 0:
-                if self.slots_available_for_decimal_part_dict[tag][item]-self.counter_for_decimal_part_dict[tag][item]<=0 or random.random() < self.freq_decimal_part_dict[tag][item]:
+                if self.slots_available_for_decimal_part_dict[tag][item] - self.counter_for_decimal_part_dict[tag][
+                    item] <= 0 or random.random() < self.freq_decimal_part_dict[tag][item]:
                     frequency += 1
                     self.counter_for_decimal_part_dict[tag][item] -= 1
                 self.slots_available_for_decimal_part_dict[tag][item] -= 1
@@ -477,7 +480,7 @@ class DataLoader:
             mask = self.mask_sparse[tag][raw_idxs].A
             pos = self.pos_sparse[tag][raw_idxs].A
             neg = self.neg_sparse[tag][raw_idxs].A
-            if model_type=="rvae":
+            if model_type == "rvae":
                 yield x, pos, neg, mask
             else:
                 yield x, pos, neg, mask, raw_idxs
@@ -512,7 +515,7 @@ class DataLoader:
             neg_te = self.neg_rank[tag][start_idx:end_idx]
             mask_pos_te = self.mask_rank[tag][start_idx:end_idx]
 
-            if model_type=="rvae":
+            if model_type == "rvae":
                 yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te
             else:
                 yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te, raw_idxs
@@ -574,6 +577,7 @@ class CachedDataLoader(DataLoader):
     """
     Version of data loader that use a sqlite cache to store data
     """
+
     def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4,
                  negatives_in_test=100, alpha=None, gamma=None, clean_cache=False):
         """
@@ -582,7 +586,7 @@ class CachedDataLoader(DataLoader):
         """
 
         self.use_popularity = model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
-                                                  model_types.OVERSAMPLING)
+                                             model_types.OVERSAMPLING)
 
         cache_file = f'{file_tr}_{1 if self.use_popularity else 0}.db'
 
@@ -608,7 +612,8 @@ class CachedDataLoader(DataLoader):
             self._init_size_struct(cur)
 
             cur.execute('SELECT data FROM config WHERE id = 1')
-            self.n_users, self.item_popularity, self.thresholds, self.item_popularity_dict, self.n_users_dict = json.loads(cur.fetchone()[0])
+            self.n_users, self.item_popularity, self.thresholds, self.item_popularity_dict, self.n_users_dict = json.loads(
+                cur.fetchone()[0])
             cur.close()
 
             self.item_popularity = np.array(self.item_popularity)
@@ -622,13 +627,13 @@ class CachedDataLoader(DataLoader):
 
                 if self.alpha is not None:
                     def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
-                        return (_gamma+1)*((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
+                        return (_gamma + 1) * ((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
                                 _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1))
 
                     w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
                            for elem in self.absolute_item_popularity]
                 else:
-                    w_i = [1/elem for elem in self.absolute_item_popularity]
+                    w_i = [1 / elem for elem in self.absolute_item_popularity]
 
                 for i, elem in enumerate(x):
                     for j in range(len(elem)):
@@ -705,7 +710,7 @@ class CachedDataLoader(DataLoader):
             self.h = h
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
-                d_i = ceil((item_ranking[idx] / (h*self.high_pop)) + 1)
+                d_i = ceil((item_ranking[idx] / (h * self.high_pop)) + 1)
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
@@ -728,7 +733,6 @@ class CachedDataLoader(DataLoader):
 
         self.item_visibility_dict = {split_type: [0] * len(self.item_popularity_dict[split_type])
                                      for split_type in ["training", "validation", "test"]}
-
 
     def _create_vector(self, item_data, shape, dtype=np.int32):
         """
@@ -781,7 +785,7 @@ class CachedDataLoader(DataLoader):
             pos = self._create_vector(pos, len(pos))
             neg = self._create_vector(neg, len(neg))
 
-            batch.append((i+1,
+            batch.append((i + 1,
                           pickle.dumps(items_np),
                           pickle.dumps(pos),
                           pickle.dumps(neg)
@@ -900,7 +904,7 @@ CREATE TABLE testset (
         thresholds = dataset['thresholds']
         item_popularity_dict = dataset['popularity_dict']
         n_users_dict = {"training": len(dataset["training_data"]), "validation": len(dataset["validation_data"]),
-                             "test": len(dataset["test_data"])}
+                        "test": len(dataset["test_data"])}
 
         self.item_popularity_dict = item_popularity_dict
         self.n_users_dict = n_users_dict
@@ -986,7 +990,7 @@ CREATE TABLE testset (
             pos = vstack(pos).A
             neg = vstack(neg).A
 
-            if model_type=="rvae":
+            if model_type == "rvae":
                 yield x, pos, neg, mask
             else:
                 yield x, pos, neg, mask, raw_idxs
@@ -1049,7 +1053,7 @@ CREATE TABLE testset (
             # neg_te is list
             mask_te = self._generate_mask_te(pos_te)
 
-            if model_type=="rvae":
+            if model_type == "rvae":
                 yield x, pos, neg, mask, pos_te, neg_te, mask_te
             else:
                 yield x, pos, neg, mask, pos_te, neg_te, mask_te, raw_idxs
@@ -1066,7 +1070,7 @@ class EnsembleDataLoader(DataLoader):
                  pos_neg_ratio=4, negatives_in_test=100, alpha=None,
                  gamma=None, device='cpu'):
         super().__init__(os.path.join(data_dir, 'data_rvae'), seed, decreasing_factor, model_type,
-                       pos_neg_ratio, negatives_in_test, alpha, gamma)
+                         pos_neg_ratio, negatives_in_test, alpha, gamma)
 
         # loading models
         print('Loading ensemble models...')
@@ -1115,7 +1119,7 @@ class EnsembleDataLoader(DataLoader):
 
 class EnsembleDataLoaderOld:
     def __init__(self, data_dir, p_dims, seed, decreasing_factor, pos_neg_ratio=4, negatives_in_test=100,
-                  chunk_size=1000, device="cpu"):
+                 chunk_size=1000, device="cpu"):
 
         dataset_file = os.path.join(data_dir, 'data_rvae')
         dataset = load_dataset(dataset_file)
@@ -1143,10 +1147,10 @@ class EnsembleDataLoaderOld:
 
         self.decreasing_factor = decreasing_factor
         n = self.pos_neg_ratio
-        self.frequencies = [n * ceil(self.max_popularity / (self.decreasing_factor * f_i)) for f_i in self.item_popularity]
+        self.frequencies = [n * ceil(self.max_popularity / (self.decreasing_factor * f_i))
+                            if f_i != 0 else f_i for f_i in self.item_popularity]
 
         self.max_width = -1
-
 
         # loading models
         print('Loading ensemble models...')
@@ -1173,7 +1177,8 @@ class EnsembleDataLoaderOld:
         print('phase 1: Loading data...')
         self._initialize()
         # checking if data have already been computed
-        preprocessed_data_dir = os.path.join(data_dir, "preprocessed_data", "low", f"decreasing_factor_{decreasing_factor}",
+        preprocessed_data_dir = os.path.join(data_dir, "preprocessed_data", "low",
+                                             f"decreasing_factor_{decreasing_factor}",
                                              str(seed))
 
         if not os.path.exists(preprocessed_data_dir):
@@ -1229,7 +1234,8 @@ class EnsembleDataLoaderOld:
             return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
 
         # check if sparse matrices have already been computed
-        dir_for_sparse_matrices = os.path.join(data_dir, "sparse_matrices", "low", f"decreasing_factor_{decreasing_factor}"
+        dir_for_sparse_matrices = os.path.join(data_dir, "sparse_matrices", "low",
+                                               f"decreasing_factor_{decreasing_factor}"
                                                , str(seed))
         if not os.path.exists(dir_for_sparse_matrices):
             os.makedirs(dir_for_sparse_matrices)
@@ -1245,8 +1251,10 @@ class EnsembleDataLoaderOld:
             print("Generating pos/neg/masks from scratch")
             for tag in self.pos:
                 shape = [self.size[tag], self.max_width]
-                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape, desc="Positive Items")
-                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape, desc="Positive Items")
+                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape,
+                                                                 desc="Positive Items")
+                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape,
+                                                                 desc="Positive Items")
                 self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], input_shape=shape, desc="Mask Items")
             # save matrices
             for tag in self.pos:
@@ -1505,7 +1513,6 @@ class EnsembleDataLoaderOld:
         if tag == 'train':
             for batch_idx, (x, pos, neg, mask) in enumerate(
                     self.iter(batch_size=batch_size, tag=tag)):
-
                 y_a, _, _ = self.baseline_model(x, True)
                 y_b, _, _ = self.popularity_model(x, True)
 
@@ -1607,3 +1614,655 @@ class EnsembleDataLoaderOld:
                         self._count_positive_user[tag][i] += 1
 
         return self._count_positive_user[tag]
+
+
+class JannachDataLoader(DataLoader):
+    def __init__(self, width_param, *args, **kwargs):
+        self.width_param = width_param
+        self.init_numpy_dict = False
+        self.submodel_type = "jannach"
+        super(JannachDataLoader, self).__init__(*args, **kwargs)
+
+    def _generate_pairs(self, pos, tag=""):
+        if not self.init_numpy_dict:
+            self.item_popularity_numpy_dict = {tag: np.array(self.item_popularity_dict[tag])
+                                               for tag in self.item_popularity_dict}
+            self.item_popularity_numpy = np.array(self.item_popularity)
+            self.init_numpy_dict = True
+        # order the list of positives by popularity (ascending)
+        pos_in_popularity_asc_order = [x for _, x in sorted(zip(self.item_popularity_numpy_dict[tag][pos], pos),
+                                                            key=lambda pair: pair[0])]
+        no_of_samples = len(pos_in_popularity_asc_order) * self.pos_neg_ratio
+        sampled_idxs = [min(floor(abs(x)), len(pos_in_popularity_asc_order) - 1) for x in
+                        norm.rvs(loc=0, scale=len(pos_in_popularity_asc_order) / self.width_param,
+                                 size=no_of_samples)]
+        positives = [pos_in_popularity_asc_order[idx] for idx in sampled_idxs]
+
+        negatives = self._sample_negatives(pos, len(positives))
+        self.max_width = max(self.max_width, len(negatives))
+
+        return positives, negatives
+
+    def _sample_negatives(self, pos, size):
+        all_items = set(range(len(self.item_popularity)))
+        neg = list(all_items - set(pos))
+        neg_in_popularity_desc_order = [x for _, x in sorted(zip(self.item_popularity_numpy[neg], neg),
+                                                             key=lambda pair: -pair[0])]
+        sampled_idxs = [min(floor(abs(x)), len(neg_in_popularity_desc_order) - 1) for x in
+                        norm.rvs(loc=0, scale=len(neg_in_popularity_desc_order) / self.width_param,
+                                 size=size)]
+        return [neg_in_popularity_desc_order[idx] for idx in sampled_idxs]
+
+
+from scipy.special import softmax
+
+
+class NegativeSamplingDataLoader(DataLoader):
+    def __init__(self, *args, **kwargs):
+        self.init_negative_distr = False
+        super(NegativeSamplingDataLoader, self).__init__(*args, **kwargs)
+
+    def _sample_negatives(self, pos, size):
+        if not self.init_negative_distr:
+            popularity = self.absolute_item_popularity_dict["training"]
+            popularity_total_mass = sum(popularity)
+            self.negative_distr = np.array([elem / popularity_total_mass for elem in popularity])
+            self.init_negative_distr = True
+
+        # select negatives based on the popularity
+        all_items = set(range(len(self.item_popularity)))
+        neg = list(all_items - set(pos))
+        return np.random.choice(neg, size=size, replace=True, p=softmax(self.negative_distr[neg]))
+
+
+class BorattoNegativeSamplingDataLoader(DataLoader):
+    def __init__(self, *args, **kwargs):
+        self.init_negative_distr = False
+        self.submodel_type="boratto"
+        super(BorattoNegativeSamplingDataLoader, self).__init__(*args, **kwargs)
+
+    def _generate_pairs(self, pos, tag=""):
+        if not self.init_negative_distr:
+            self.numpy_pop = np.array(self.item_popularity_dict["training"])
+            self.init_negative_distr = True
+
+        # IMPROVEMENT
+        positives = []
+        frequencies = []
+        for item in pos:
+            if self.use_popularity:
+                frequency = self.frequencies_dict[tag][item]
+            else:
+                frequency = self.pos_neg_ratio
+            if self.counter_for_decimal_part_dict[tag][item] > 0:
+                if self.slots_available_for_decimal_part_dict[tag][item] - self.counter_for_decimal_part_dict[tag][
+                    item] <= 0 or random.random() < self.freq_decimal_part_dict[tag][item]:
+                    frequency += 1
+                    self.counter_for_decimal_part_dict[tag][item] -= 1
+                self.slots_available_for_decimal_part_dict[tag][item] -= 1
+
+            self.item_visibility_dict[tag][item] += frequency
+            positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
+            frequencies[0:0] = [frequency]
+
+        negatives = self._sample_negatives(pos, frequencies)
+        self.max_width = max(self.max_width, len(positives))
+
+        return positives, negatives
+
+    def _sample_negatives(self, pos, frequencies):
+        size = sum(frequencies)
+        # select negatives based on the popularity
+        all_items = set(range(len(self.item_popularity)))
+        neg = np.array(list(all_items - set(pos)))
+        negatives = []
+        for item_idx in range(len(frequencies)):
+            pos_item = pos[item_idx]
+            pos_popularity = self.numpy_pop[pos_item]
+            # half of the negatives are less popular than the positive while the rest is more popular
+            neg_popularities = self.numpy_pop[neg]
+            max_pop = max(neg_popularities)
+            less_pop_negs = neg[neg_popularities <= pos_popularity]
+            more_pop_negs = neg[neg_popularities > pos_popularity]
+            if pos_popularity >= max_pop:
+                less_pop_negs = neg[neg_popularities < pos_popularity]
+                more_pop_negs = neg[neg_popularities >= pos_popularity]
+            neg_frequency = frequencies[item_idx]
+            less_pop_frequency = neg_frequency // 2
+            more_pop_frequency = neg_frequency - less_pop_frequency
+            if more_pop_negs.shape[0] == 0: # case when pos items is more popular than all negative items
+                less_pop_frequency = neg_frequency
+                more_pop_frequency = 0
+            less_pop_sampled_negs = random.choices(less_pop_negs, k=less_pop_frequency)
+            more_pop_sampled_negs = random.choices(more_pop_negs, k=more_pop_frequency)
+            sampled_negatives = less_pop_sampled_negs + more_pop_sampled_negs
+            negatives[0:0] = sampled_negatives
+        return negatives
+
+
+class Word2VecNegativeSamplingDataLoader(DataLoader):
+    def __init__(self, beta_sampling, *args, **kwargs):
+        self.init_negative_distr = False
+        self.beta_sampling = beta_sampling
+        super(NegativeSamplingDataLoader, self).__init__(*args, **kwargs)
+
+    def _sample_negatives(self, pos, size):
+        if not self.init_negative_distr:
+            popularity = self.absolute_item_popularity_dict["training"]
+            popularity_total_mass = sum(popularity)
+            self.negative_distr = np.array([elem / popularity_total_mass for elem in popularity])
+            self.init_negative_distr = True
+
+        # select negatives based on the popularity
+        all_items = set(range(len(self.item_popularity)))
+        neg = list(all_items - set(pos))
+        popularity = np.array(self.absolute_item_popularity_dict["training"])[neg]
+        popularity = popularity ** self.beta_sampling
+
+        return np.random.choice(neg, size=size, replace=True, p=softmax(popularity))
+
+
+class InversePopularityNegativeSamplingDataLoader(DataLoader):
+
+    def _sample_negatives(self, pos, size):
+        # TODO
+        return
+
+
+import networkx as nx
+from fast_pagerank import pagerank_power
+from sklearn.preprocessing import QuantileTransformer
+
+
+class InversePersonalizedPagerankNegativeSamplingDataLoader(DataLoader):
+
+    def generating_ppr_scores(self, dataset, preprocessed_data_dir):
+        # 1st step. Creating the bipartite user-item graph
+        # an edge exists if it exists a user-item interaction in the data
+        g = nx.Graph()
+        for user_id in dataset["training_data"]:
+            g.add_edges_from(zip([f"{user_id}U"] * len(dataset["training_data"][user_id][0]),
+                                 [f"{elem}I" for elem in dataset["training_data"][user_id][0]]))
+        # computing a series of constants/supporting variables
+        map_nodes_to_label = {node_label: i for i, node_label in enumerate(g.nodes())}
+        users_idxs = [v for k, v in map_nodes_to_label.items() if "U" in k]
+        sparse_adj = nx.to_scipy_sparse_matrix(g)
+        number_of_users = len(dataset["training_data"])
+
+        if os.path.exists(os.path.join(preprocessed_data_dir, "ppr_scores.pkl")):
+            self.graph_nodes = list(g.nodes())
+            with open(os.path.join(preprocessed_data_dir, "ppr_scores.pkl"), 'rb') as f:
+                self.ppr_scores = pickle.load(f)
+            return
+
+        # 2nd step. Computing the Personalized PageRank for all user nodes
+        damping_factor = .85
+        ppr_scores = {}  # it hosts values to be used by quantile scaler
+        all_ppr_scores = {}  # it hosts values used when sampling negatives (a value for all nodes)
+        for user_id in tqdm(dataset["training_data"], "PPR scores on users"):
+            personalize = np.zeros(shape=g.number_of_nodes())
+            personalize[map_nodes_to_label[f"{user_id}U"]] = 1
+            scores = pagerank_power(sparse_adj, p=damping_factor, personalize=personalize, tol=1e-6)
+            # excluding scores of other users and positive items (neighbors)
+            neighbors_idxs = [map_nodes_to_label[elem] for elem in g.neighbors(f"{user_id}U")]
+            all_scores = np.copy(scores)
+            all_scores[users_idxs + neighbors_idxs] = 1
+            all_ppr_scores[user_id] = all_scores
+            scores = np.delete(scores, users_idxs + neighbors_idxs)
+            ppr_scores[user_id] = scores
+
+        # 3rd step. Transforming the scores with a Quantile Scaler
+        # due to the highly-skewed distribution of computed scores, we adopt a Quantile Scaler to
+        # generate a uniform distribution of scores in (0,1).
+        def _flatten(t):
+            return np.array([item for sublist in t for item in sublist])
+
+        NSAMPLE = 100000
+        all_scores = np.random.permutation(_flatten(ppr_scores.values()))[:NSAMPLE]
+        qt = QuantileTransformer(n_quantiles=10, random_state=0)
+        qt.fit(np.array(all_scores).reshape(-1, 1))
+        self.graph_nodes = list(g.nodes())
+        self.ppr_scores = {user_id: 1 - qt.transform(np.array(user_ppr_scores).reshape(-1, 1)).flatten()
+                           for user_id, user_ppr_scores in all_ppr_scores.items()}
+
+    def _load_data(self, dataset, preprocessed_data_dir):
+        train = []
+        validation = []
+        test = []
+
+        training_data = dataset['training_data']
+        validation_data = dataset['validation_data']
+        test_data = dataset['test_data']
+
+        print('LEN TEST:', len(test_data.keys()))
+
+        for user_id in training_data:
+            if user_id % 1000 == 0:
+                print("{}/{}".format(user_id, len(training_data)))
+
+            pos, neg = training_data[user_id]
+            assert len(neg) >= 100, f'fail train neg for user {user_id}'
+
+            items_np = np.zeros(self.n_items, dtype=np.int8)
+            items_np[pos] = 1
+
+            pos, neg = self._generate_pairs_for_train(pos, user_id, tag="training")
+
+            train.append(items_np)
+            self.pos['train'].append(pos)
+            self.neg['train'].append(neg)
+
+        print('self.max_width:', self.max_width)
+
+        self.data['train'] = np.array(train, dtype=np.int8)
+        self.data['train'][:] = train[:]
+        self.size['train'] = len(train)
+
+        for user_id in validation_data:
+            if user_id % 1000 == 0:
+                print("{}/{}".format(user_id, len(validation_data)))
+            positives_tr, positives_te, negatives_sampled = validation_data[user_id]
+            if len(positives_te) == 0:
+                continue
+
+            assert len(negatives_sampled) >= 100, f'fail valid neg for user {user_id}'
+
+            items_np = np.zeros(self.n_items, dtype=np.int8)
+            items_np[positives_tr] = 1
+            items_np[positives_te] = 1
+
+            pos, neg = self._generate_pairs(positives_tr, tag="validation")
+
+            validation.append(items_np)
+
+            self.pos['validation'].append(pos)
+            self.neg['validation'].append(neg)
+
+            self.pos_rank['validation'].append(positives_te)
+            self.neg_rank['validation'].append(negatives_sampled)
+
+        if len(validation) > 0:
+            self.data['validation'] = np.array(validation, dtype=np.int8)
+            self.data['validation'][:] = validation[:]
+            self.size['validation'] = len(validation)
+
+        for user_id in test_data:
+            if user_id % 1000 == 0:
+                print("{}/{}".format(user_id, len(test_data)))
+            positives_tr, positives_te, negatives_sampled = test_data[user_id]
+            if len(positives_te) == 0:
+                continue
+
+            assert len(negatives_sampled) >= 100, f'fail test neg for user {user_id}'
+
+            items_np = np.zeros(self.n_items, dtype=np.int8)
+            items_np[positives_tr] = 1
+            items_np[positives_te] = 1
+
+            pos, neg = self._generate_pairs(positives_tr, tag="test")
+
+            test.append(items_np)
+
+            self.pos['test'].append(pos)
+            self.neg['test'].append(neg)
+
+            self.pos_rank['test'].append(positives_te)
+            self.neg_rank['test'].append(negatives_sampled)
+
+        if len(test) > 0:
+            self.data['test'] = np.array(test, dtype=np.int8)
+            self.data['test'][:] = test[:]
+            self.size['test'] = len(test)
+
+        # saving artifacts on disk
+        tags = ["train", "validation", "test"]
+        for tag in tags:
+            with open(os.path.join(preprocessed_data_dir, f'pos_{tag}.pkl'), 'wb') as f:
+                pickle.dump(self.pos[tag], f)
+            with open(os.path.join(preprocessed_data_dir, f'neg_{tag}.pkl'), 'wb') as f:
+                pickle.dump(self.neg[tag], f)
+            np.save(os.path.join(preprocessed_data_dir, f"data_{tag}.npy"), self.data[tag])
+            if tag in tags[1:]:  # all except train
+                with open(os.path.join(preprocessed_data_dir, f'pos_rank_{tag}.pkl'), 'wb') as f:
+                    pickle.dump(self.pos_rank[tag], f)
+                with open(os.path.join(preprocessed_data_dir, f'neg_rank_{tag}.pkl'), 'wb') as f:
+                    pickle.dump(self.neg_rank[tag], f)
+
+        with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'wb') as f:
+            pickle.dump(self.max_width, f)
+
+    def _generate_pairs_for_train(self, pos, user_id, tag=""):
+        # IMPROVEMENT
+        positives = []
+        negatives = []
+        for item in pos:
+            if self.use_popularity:
+                frequency = self.frequencies_dict[tag][item]
+            else:
+                frequency = self.pos_neg_ratio
+            if self.counter_for_decimal_part_dict[tag][item] > 0:
+                if self.slots_available_for_decimal_part_dict[tag][item] - self.counter_for_decimal_part_dict[tag][
+                    item] <= 0 or random.random() < self.freq_decimal_part_dict[tag][item]:
+                    frequency += 1
+                    self.counter_for_decimal_part_dict[tag][item] -= 1
+                self.slots_available_for_decimal_part_dict[tag][item] -= 1
+
+            self.item_visibility_dict[tag][item] += frequency
+            positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
+            negatives[0:0] = self._sample_negatives_for_train(self.ppr_scores[user_id], frequency)
+        self.max_width = max(self.max_width, len(negatives))
+
+        return positives, negatives
+
+    def _sample_negatives_for_train(self, sampling_probabilities, size):
+        return list(
+            map(lambda x: int(x[:-1]), random.choices(self.graph_nodes, k=size, weights=sampling_probabilities)))
+
+    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100, alpha=None,
+                 gamma=None):
+
+        dataset = load_dataset(file_tr)
+        if "contamination" in dataset:
+            self.contamination = dataset["contamination"]
+        self.file_tr = file_tr
+        if "bpr" in file_tr:
+            self.discount_idxs = {"validation": dataset["original_training_size"],
+                                  "test": dataset["original_training_size"] + dataset["original_val_size"]}
+        self.model_type = model_type
+
+        # checking if data have already been computed
+        path = Path(file_tr)
+        par_dir = path.parent.absolute()
+        if "bpr" in file_tr:
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type
+                                                 , f"decreasing_factor_{decreasing_factor}", str(seed))
+        else:
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type
+                                                 , f"decreasing_factor_{decreasing_factor}", str(seed))
+
+        self.generating_ppr_scores(dataset, preprocessed_data_dir)
+
+        self.n_users = dataset["users"]
+        self.item_popularity = dataset['popularity']
+        self.item_popularity_dict = dataset['popularity_dict']
+
+        self.n_users_dict = {"training": len(dataset["training_data"]), "validation": len(dataset["validation_data"]),
+                             "test": len(dataset["test_data"])}
+        self.absolute_item_popularity_dict = {split_type: [elem * self.n_users_dict[split_type]
+                                                           for elem in dataset['popularity_dict'][split_type]]
+                                              for split_type in dataset['popularity_dict']
+                                              }
+        self.thresholds = dataset['thresholds']
+        self.absolute_thresholds = list(map(lambda x: x * self.n_users_dict["training"], self.thresholds))
+
+        self.pos_neg_ratio = pos_neg_ratio
+        self.negatives_in_test = negatives_in_test
+
+        # IMPROVEMENT
+        self.low_pop = len([i for i in self.item_popularity_dict["training"] if i <= self.thresholds[0]])
+        self.med_pop = len(
+            [i for i in self.item_popularity_dict["training"] if self.thresholds[0] < i <= self.thresholds[1]])
+        self.high_pop = len([i for i in self.item_popularity_dict["training"] if self.thresholds[1] < i])
+
+        # compute the Beta parameter according to the item popularity
+        if self.model_type == model_types.REWEIGHTING:
+            self.absolute_item_popularity = np.array(self.absolute_item_popularity_dict["training"])
+            # Beta is defined as the average popularity of the medium-popular class of items
+            self.beta = self.absolute_item_popularity[(self.absolute_item_popularity >= self.absolute_thresholds[0]) &
+                                                      (self.absolute_item_popularity < self.absolute_thresholds[
+                                                          1])].mean()
+            assert self.beta > 0, self.absolute_thresholds
+            self.gamma = gamma
+            self.alpha = alpha
+            assert alpha > 0 and gamma > 0, alpha
+
+        self.n_items = len(self.item_popularity)
+        self.use_popularity = self.model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
+                                                  model_types.OVERSAMPLING)
+        self.sorted_item_popularity = sorted(self.item_popularity)
+        limit = 1
+        self.max_popularity = self.sorted_item_popularity[-limit]
+        self.min_popularity = self.sorted_item_popularity[0]
+
+        self.decreasing_factor = decreasing_factor
+        n = self.pos_neg_ratio
+        self.frequencies_dict = {}
+        self.freq_decimal_part_dict = {}
+        self.counter_for_decimal_part_dict = {}
+        self.slots_available_for_decimal_part_dict = {}
+        for split_type in ["training", "validation", "test"]:
+            frequencies = []
+            freq_decimal_part = []
+            item_popularity = self.item_popularity_dict[split_type]
+            nusers = self.n_users_dict[split_type]
+            # computing item ranking
+            item_ranking = rankdata(item_popularity)
+            max_popularity = max(item_popularity)
+            h = 1
+            if "ml-20m" in self.file_tr:
+                h = 0.12
+            if "netflix" in self.file_tr:
+                h = 0.14
+            self.h = h
+
+            for idx in range(len(item_popularity)):
+                f_i = item_popularity[idx]
+
+                d_i = ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
+                if f_i > 0:
+                    if self.model_type == model_types.OVERSAMPLING:
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    else:
+                        d_i = self.decreasing_factor
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    frequencies.append(int(n_int))
+                    freq_decimal_part.append(n_i_decimal)
+                else:
+                    frequencies.append(0)
+                    freq_decimal_part.append(0)
+            counter_for_decimal_part = [int(int(item_popularity[idx] * nusers) * freq_decimal_part[idx]) for idx in
+                                        range(len(item_popularity))]  # K_i
+            slots_available_for_decimal_part = [int(f_i * nusers) for f_i in item_popularity]  # K
+
+            self.frequencies_dict[split_type] = frequencies
+            self.freq_decimal_part_dict[split_type] = freq_decimal_part
+            self.counter_for_decimal_part_dict[split_type] = counter_for_decimal_part
+            self.slots_available_for_decimal_part_dict[split_type] = slots_available_for_decimal_part
+
+        self.item_visibility_dict = {split_type: [0] * len(self.item_popularity_dict[split_type])
+                                     for split_type in ["training", "validation", "test"]}
+
+        self.max_width = -1
+
+        print('phase 1: Loading data...')
+        self._initialize()
+
+        if not os.path.exists(preprocessed_data_dir):
+            os.makedirs(preprocessed_data_dir)
+
+        def _dir_does_not_contain_files(input_path):
+            return len(os.listdir(input_path)) == 0
+
+        if _dir_does_not_contain_files(preprocessed_data_dir):
+            print("Generating pre-processed data from scratch")
+            self._load_data(dataset, preprocessed_data_dir)
+        else:
+            print("Loading pre-processed data from disk")
+            tags = ["train", "validation", "test"]
+            for tag in tags:
+                with open(os.path.join(preprocessed_data_dir, f'pos_{tag}.pkl'), 'rb') as f:
+                    self.pos[tag] = pickle.load(f)
+                with open(os.path.join(preprocessed_data_dir, f'neg_{tag}.pkl'), 'rb') as f:
+                    self.neg[tag] = pickle.load(f)
+                self.data[tag] = np.load(os.path.join(preprocessed_data_dir, f"data_{tag}.npy"))
+                self.size[tag] = self.data[tag].shape[0]
+                if tag in tags[1:]:  # all except train
+                    with open(os.path.join(preprocessed_data_dir, f'pos_rank_{tag}.pkl'), 'rb') as f:
+                        self.pos_rank[tag] = pickle.load(f)
+                    with open(os.path.join(preprocessed_data_dir, f'neg_rank_{tag}.pkl'), 'rb') as f:
+                        self.neg_rank[tag] = pickle.load(f)
+
+            with open(os.path.join(preprocessed_data_dir, f'max_width.pkl'), 'rb') as f:
+                self.max_width = pickle.load(f)
+
+        if not os.path.exists(os.path.join(par_dir, "item_pop.pkl")):
+            with open(os.path.join(par_dir, "item_pop.pkl"), 'wb') as handle:
+                pickle.dump(self.absolute_item_popularity_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if self.model_type == model_types.BASELINE:
+            add_term = "_B"
+        else:
+            add_term = ""
+        if not os.path.exists(os.path.join(par_dir, f"item_exposure{add_term}.pkl")):
+            with open(os.path.join(par_dir, f"item_exposure{add_term}.pkl"), 'wb') as handle:
+                pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        print("phase 2: converting the pos/neg list of lists to a sparse matrix for future indexing")
+
+        def _converting_to_csr_matrix(x, input_shape, desc):
+            rows = []
+            cols = []
+            vals = []
+            for i, elem in tqdm(enumerate(x), desc=desc):  # users loop
+                for j in range(len(elem)):  # pos/neg loop
+                    rows.append(i)
+                    cols.append(j)
+                    vals.append(elem[j])
+            return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.int32)
+
+        if model_type == model_types.REWEIGHTING:
+            def _creating_csr_mask(x, input_shape, desc):
+                print("Currently using masks with reweighting")
+                rows = []
+                cols = []
+                vals = []
+
+                if self.alpha is not None:
+                    def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
+                        return (_gamma + 1) * ((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
+                                _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1))
+
+                    w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
+                           for elem in self.absolute_item_popularity]
+                else:
+                    w_i = [1 / elem for elem in self.absolute_item_popularity]
+
+                for i, elem in tqdm(enumerate(x), desc=desc):
+                    for j in range(len(elem)):
+                        rows.append(i)
+                        cols.append(j)
+                        # elem[j] è l'item ID dell'oggetto
+                        vals.append(w_i[elem[j]])
+                return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.float)
+        else:
+            def _creating_csr_mask(x, input_shape, desc):
+                rows = []
+                cols = []
+                vals = []
+                for i, elem in tqdm(enumerate(x), desc=desc):
+                    for j in range(len(elem)):
+                        rows.append(i)
+                        cols.append(j)
+                        vals.append(1)
+                return csr_matrix((vals, (rows, cols)), shape=input_shape, dtype=np.uint8)
+
+        # check if sparse matrices have already been computed
+        if "bpr" in file_tr:
+            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", "bpr", self.model_type,
+                                                   f"decreasing_factor_{decreasing_factor}", str(seed))
+        else:
+            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type,
+                                                   f"decreasing_factor_{decreasing_factor}", str(seed))
+
+        if not os.path.exists(dir_for_sparse_matrices):
+            os.makedirs(dir_for_sparse_matrices)
+
+        self.pos_sparse = dict()
+        self.neg_sparse = dict()
+        self.mask_sparse = dict()
+
+        if _dir_does_not_contain_files(dir_for_sparse_matrices):
+            print("Generating pos/neg/masks from scratch")
+            for tag in self.pos:
+                shape = [self.size[tag], self.max_width]
+                self.pos_sparse[tag] = _converting_to_csr_matrix(self.pos[tag], input_shape=shape,
+                                                                 desc="Positive Items")
+                self.neg_sparse[tag] = _converting_to_csr_matrix(self.neg[tag], input_shape=shape,
+                                                                 desc="Negative Items")
+                self.mask_sparse[tag] = _creating_csr_mask(self.pos[tag], input_shape=shape, desc="Mask Items")
+            # save matrices
+            for tag in self.pos:
+                save_npz(os.path.join(dir_for_sparse_matrices, f"pos_{tag}.npz"), self.pos_sparse[tag])
+                save_npz(os.path.join(dir_for_sparse_matrices, f"neg_{tag}.npz"), self.neg_sparse[tag])
+                save_npz(os.path.join(dir_for_sparse_matrices, f"mask_{tag}.npz"), self.mask_sparse[tag])
+        else:
+            # load matrices
+            print("Loading stored pos/neg/mask matrices")
+            for tag in self.pos:
+                self.pos_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"pos_{tag}.npz"))
+                self.neg_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"neg_{tag}.npz"))
+                self.mask_sparse[tag] = load_npz(
+                    os.path.join(dir_for_sparse_matrices, f"mask_{tag}.npz"))
+
+        print('phase 3: generating test masks...')
+
+        for tag in ('validation', 'test'):
+            self._generate_mask_te(tag)
+
+        with open(os.path.join(preprocessed_data_dir, "ppr_scores.pkl"), 'wb') as f:
+            pickle.dump(self.ppr_scores, f)
+
+        print('Done.')
+
+
+class PersonalizedPagerankNegativeSamplingDataLoader(InversePersonalizedPagerankNegativeSamplingDataLoader):
+
+    def generating_ppr_scores(self, dataset, preprocessed_data_dir):
+        # 1st step. Creating the bipartite user-item graph
+        # an edge exists if it exists a user-item interaction in the data
+        g = nx.Graph()
+        for user_id in dataset["training_data"]:
+            g.add_edges_from(zip([f"{user_id}U"] * len(dataset["training_data"][user_id][0]),
+                                 [f"{elem}I" for elem in dataset["training_data"][user_id][0]]))
+        # computing a series of constants/supporting variables
+        map_nodes_to_label = {node_label: i for i, node_label in enumerate(g.nodes())}
+        users_idxs = [v for k, v in map_nodes_to_label.items() if "U" in k]
+        sparse_adj = nx.to_scipy_sparse_matrix(g)
+        number_of_users = len(dataset["training_data"])
+
+        if os.path.exists(os.path.join(preprocessed_data_dir, "ppr_scores.pkl")):
+            self.graph_nodes = list(g.nodes())
+            with open(os.path.join(preprocessed_data_dir, "ppr_scores.pkl"), 'rb') as f:
+                self.ppr_scores = pickle.load(f)
+            return
+
+        # 2nd step. Computing the Personalized PageRank for all user nodes
+        damping_factor = .85
+        ppr_scores = {}  # it hosts values to be used by quantile scaler
+        all_ppr_scores = {}  # it hosts values used when sampling negatives (a value for all nodes)
+        for user_id in tqdm(dataset["training_data"], "PPR scores on users"):
+            personalize = np.zeros(shape=g.number_of_nodes())
+            personalize[map_nodes_to_label[f"{user_id}U"]] = 1
+            scores = pagerank_power(sparse_adj, p=damping_factor, personalize=personalize, tol=1e-6)
+            # excluding scores of other users and positive items (neighbors)
+            neighbors_idxs = [map_nodes_to_label[elem] for elem in g.neighbors(f"{user_id}U")]
+            all_scores = np.copy(scores)
+            all_scores[users_idxs + neighbors_idxs] = 0
+            all_ppr_scores[user_id] = all_scores
+            scores = np.delete(scores, users_idxs + neighbors_idxs)
+            ppr_scores[user_id] = scores
+
+        # 3rd step. Transforming the scores with a Quantile Scaler
+        # due to the highly-skewed distribution of computed scores, we adopt a Quantile Scaler to
+        # generate a uniform distribution of scores in (0,1).
+        def _flatten(t):
+            return np.array([item for sublist in t for item in sublist])
+
+        NSAMPLE = 100000
+        all_scores = np.random.permutation(_flatten(ppr_scores.values()))[:NSAMPLE]
+        qt = QuantileTransformer(n_quantiles=10, random_state=0)
+        qt.fit(np.array(all_scores).reshape(-1, 1))
+        self.graph_nodes = list(g.nodes())
+        self.ppr_scores = {user_id: qt.transform(np.array(user_ppr_scores).reshape(-1, 1)).flatten()
+                           for user_id, user_ppr_scores in all_ppr_scores.items()}

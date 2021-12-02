@@ -272,8 +272,8 @@ class BPR(torch.nn.Module):
         torch.nn.init.xavier_uniform_(self.embed_item.weight)
 
     def forward(self, user_idxs, all_item_idxs):
-        users_embeddings = self.embed_user(user_idxs) # bs x latent dim
-        items_embeddings = self.embed_item(all_item_idxs) # n_items x latent_dim
+        users_embeddings = self.embed_user(user_idxs)  # bs x latent dim
+        items_embeddings = self.embed_item(all_item_idxs)  # n_items x latent_dim
 
         return torch.mm(users_embeddings, items_embeddings.T)
 

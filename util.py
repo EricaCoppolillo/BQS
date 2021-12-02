@@ -1,8 +1,10 @@
-import pickle
+import pickle5 as pickle
 import numpy as np
 import random
 import json
 import torch
+import torch.nn.functional as F
+from torch import nn
 import re
 
 
@@ -71,3 +73,32 @@ def clean_json_string(json_str):
     p = re.compile('(?<!\\\\)\'')
     json_str = p.sub('\"', json_str)
     return json_str
+
+
+def normalize_distr(matrix, method="norm"):
+
+    if method == "softmax":
+        return nn.Softmax(dim=1)(matrix)
+        #return softmax(matrix, axis=1)
+    elif method == "norm":
+        return matrix / matrix.sum(axis=1, keepdims=True)
+    else:
+        raise Exception(f"method you passed: {method} not yet supported. Choose in [softmax, norm].")
+
+
+
+
+def _kl_div_2d(p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+    # D_KL(P || Q)
+    batch, chans, height, width = p.shape
+    unsummed_kl = F.kl_div(
+        q.reshape(batch * chans, height * width).log(), p.reshape(batch * chans, height * width), reduction='none'
+    )
+    kl_values = unsummed_kl.sum(-1).view(batch, chans)
+    return kl_values
+
+
+def js_div_2d(p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+    # JSD(P || Q)
+    m = 0.5 * (p + q)
+    return 0.5 * _kl_div_2d(p, m) + 0.5 * _kl_div_2d(q, m)

@@ -2,14 +2,23 @@ import os
 import pickle
 import tqdm
 
+import hashlib
+
 base_dir = "./"
 data_dir = os.path.join(base_dir, "data")
 datasets = [elem for elem in os.listdir(data_dir) if not elem.startswith(".")]
 
 for IDX in range(len(datasets)):
 
+    # if datasets[IDX] != "LFR_benchmark":
+    #     continue
+
     if not os.path.exists(os.path.join(data_dir, datasets[IDX], "data_rvae.pickle")):
         print(f"Skipping: {datasets[IDX]}")
+        continue
+
+    if os.path.exists(os.path.join(data_dir, datasets[IDX], "data_bpr.pickle")):
+        print(f"Skipping: {datasets[IDX]} - BPR format already exists")
         continue
 
     with open(os.path.join(data_dir, datasets[IDX], "data_rvae.pickle"), "rb") as f:
@@ -31,6 +40,7 @@ for IDX in range(len(datasets)):
                                               data[split_type][user_id][NEGATIVES_IDX]]
                                     for split_type in ["validation_data", "test_data"] for user_id in data[split_type]}}
 
+
     for key in ["items", "users", "thresholds", "validation_data", "test_data", "popularity"]:
         new_data[key] = data[key]
 
@@ -45,5 +55,8 @@ for IDX in range(len(datasets)):
     new_data["popularity_dict"] = popularity_dict
     new_data["original_training_size"] = len(data["training_data"])
     new_data["original_val_size"] = len(data["validation_data"])
+
+    result = hashlib.md5(str(new_data).encode())
+    print('MD5 = ', result.hexdigest())
     with open(os.path.join(data_dir, datasets[IDX], "data_bpr.pickle"), 'wb') as handle:
         pickle.dump(new_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
