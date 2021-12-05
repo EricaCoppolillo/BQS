@@ -42,6 +42,8 @@ BETA_SAMPLING = float(config.beta_sampling)
 if model_type == "reweighting":
     assert (not config.alpha or not config.gamma) or (config.alpha > 0 and config.gamma > 0), config.alpha
 
+
+
 # ---------------------------------------------------
 
 # set seed for experiment reproducibility
