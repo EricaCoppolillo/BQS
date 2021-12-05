@@ -520,6 +520,7 @@ plt.show();
 
 model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
+result_validation = evaluate(trainloader, popularity, 'validation')
 
 print(f'K = {config.gamma_k}')
 print("Test Statistics: \n")
@@ -564,6 +565,11 @@ def renaming_results(result_dict, rename_dict):
 
 with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
     json.dump(list(map(lambda x: renaming_results(x, renaming_luciano_stat), stat_metric)), fp)
+
+# validation results
+with open(os.path.join(run_dir, 'result_val.json'), 'w') as fp:
+    json.dump(renaming_results(result_test, renaming_luciano_stat), fp,
+              indent=4, sort_keys=True)
 
 # test results
 with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
