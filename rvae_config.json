@@ -1,5 +1,5 @@
 {
-  "CUDA_VISIBLE_DEVICES": "1",
+  "CUDA_VISIBLE_DEVICES": "",
   "dataset_name": "datasets.MOVIELENS_1M",
   "model_type": "model_types.BASELINE",
   "copy_pasting_data": "True",
@@ -28,7 +28,8 @@
   "data_loader_type": "",
   "jannach_width": 2.25,
   "beta_sampling": 0.75,
-  "regularizer": "boratto",
-  "reg_weight": 1.25,
+  "regularizer": "PD",
+  "reg_weight": 0.2,
+  "pc_weight": 0.2,
   "seed": 12121995
 }

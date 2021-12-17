@@ -33,6 +33,7 @@ config.p_dims = eval(config.p_dims)
 config.alpha = eval(config.alpha)
 config.gamma = eval(config.gamma)
 reg_weight = float(config.reg_weight)
+pc_weight = float(config.pc_weight)
 if config.gamma:
     config.gamma = float(config.gamma)
 if config.alpha:
@@ -41,8 +42,6 @@ WIDTH_PARAM = float(config.jannach_width)
 BETA_SAMPLING = float(config.beta_sampling)
 if model_type == "reweighting":
     assert (not config.alpha or not config.gamma) or (config.alpha > 0 and config.gamma > 0), config.alpha
-
-
 
 # ---------------------------------------------------
 
@@ -199,14 +198,39 @@ if config.regularizer == "JS":
             return 2
         else:
             return 1
+
+
     pop_mapping = torch.zeros(size=(n_items, 3))
     pop_mapping = pop_mapping.to(device)
     for i in range(len(abs_frequencies)):
         pop_mapping[i, _determine_class_pop(abs_frequencies[i], abs_thresholds)] = 1
     pop_mapping.requires_grad = False
 elif config.regularizer == "boratto":
-    torch_pop = torch.tensor(popularity).float().cuda()
+    if CUDA:
+        torch_pop = torch.tensor(popularity).float().cuda()
+    else:
+        torch_pop = torch.tensor(popularity).float()
     torch_pop.requires_grad = False
+elif config.regularizer == "PD":
+    elu_func = torch.nn.ELU()
+    if CUDA:
+        torch_pop = torch.tensor([elem ** float(config.reg_weight) for elem in popularity]).float().cuda()
+    else:
+        torch_pop = torch.tensor([elem ** float(config.reg_weight) for elem in popularity]).float()
+    torch_pop.requires_grad = False
+elif config.regularizer == "PC":
+    if CUDA:
+        torch_pop = torch.tensor(popularity).float().cuda()
+        torch_abs_pop = torch.tensor(abs_frequencies).float().cuda()
+        torch_n_items = torch.tensor([n_items] * config.batch_size).float().cuda()
+    else:
+        torch_pop = torch.tensor(popularity).float()
+        torch_abs_pop = torch.tensor(abs_frequencies).float()
+        torch_n_items = torch.tensor([n_items] * config.batch_size).float()
+    torch_pop.requires_grad = False
+    torch_abs_pop.requires_grad = False
+    torch_n_items.requires_grad = False
+
 
 def train(dataloader, epoch, optimizer):
     if config.data_loader_type in {"stream", "2stages"}:
@@ -245,8 +269,21 @@ def train(dataloader, epoch, optimizer):
         optimizer.zero_grad()
         y, mu, logvar = model(x)
 
+        if config.regularizer == "PD":
+            y = elu_func(y) + 1
+            y = torch.einsum('bi,i -> bi', y, torch_pop)
+        elif config.regularizer == "PC":
+            denominator = torch_n_items[:x.shape[0]] - x.sum(dim=0)
+            n_u = torch.norm(torch.einsum('bi, b -> bi', (torch.einsum('bi, bi -> bi', y, 1 - x)), 1/denominator), \
+                             p='fro', dim=0)
+            c = torch.einsum('bi, i -> bi', (y*config.reg_weight + (1-reg_weight)), 1/torch_abs_pop)
+            m_u = torch.norm(torch.einsum('bi, b -> bi', torch.einsum('bi, bi->bi', c, 1-x), 1/denominator), \
+                             p='fro', dim=0)
+            y = torch.einsum('bi, bi -> bi', y, c*pc_weight*n_u/m_u)
+
+
         loss = criterion.log_p(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask,
-                         model_type=model_type)
+                               model_type=model_type)
 
         if config.regularizer == "JS":
             foldin_mask = (x == 1).float()
@@ -256,7 +293,8 @@ def train(dataloader, epoch, optimizer):
             foldin_pop = torch.einsum('bi,ic -> bc', x, pop_mapping)
             foldin_pop = foldin_pop.float()
             norm_foldin_pop = js_div_2d(foldin_pop)
-            loss += js_div_2d(norm_topk_pop_distro.unsqueeze(0).unsqueeze(0) + 1e-10, norm_foldin_pop.unsqueeze(0).unsqueeze(0) + 1e-10)[0, 0]*reg_weight
+            loss += js_div_2d(norm_topk_pop_distro.unsqueeze(0).unsqueeze(0) + 1e-10,
+                              norm_foldin_pop.unsqueeze(0).unsqueeze(0) + 1e-10)[0, 0] * reg_weight
         elif config.regularizer == "boratto":
             # computing the absolute correlation
             vx = loss - torch.mean(loss)
@@ -264,7 +302,7 @@ def train(dataloader, epoch, optimizer):
             correlation = torch.abs(
                 torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2))))
             loss = torch.sum(loss)
-            loss += correlation*reg_weight
+            loss += correlation * reg_weight
         else:
             loss = torch.sum(loss)
 
@@ -323,6 +361,10 @@ def evaluate(dataloader, popularity, tag='validation'):
 
             x_input = x_tensor * (1 - mask_te)
             y, mu, logvar = model(x_input, True)
+
+            if config.regularizer == "PD":
+                y = elu_func(y) + 1
+
             # print("[EVAL]: model forward done")
             #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
             loss = criterion.log_p(x_input, y, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
@@ -336,14 +378,15 @@ def evaluate(dataloader, popularity, tag='validation'):
                 foldout_pop = foldout_pop.float()
                 norm_foldout_pop = normalize_distr(foldout_pop)
                 loss += js_div_2d(norm_topk_pop_distro.unsqueeze(0).unsqueeze(0) + 1e-10,
-                                   norm_foldout_pop.unsqueeze(0).unsqueeze(0) + 1e-10)[0, 0] * js_reg
+                                  norm_foldout_pop.unsqueeze(0).unsqueeze(0) + 1e-10)[0, 0] * js_reg
             elif config.regularizer == "boratto":
                 # computing the absolute correlation
                 vx = loss - torch.mean(loss)
                 vy = torch_pop[pos.long()] - torch.mean(torch_pop[pos.long()])
-                correlation = torch.abs(torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2))))
+                correlation = torch.abs(
+                    torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2))))
                 loss = torch.sum(loss)
-                loss += correlation*reg_weight
+                loss += correlation * reg_weight
             else:
                 loss = torch.sum(loss)
 
@@ -538,6 +581,8 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
     fp.write(f'K = {config.gamma_k}\n')
     fp.write(f'Loss = {lossname}\n')
     # fp.write(f'Epochs train = {len(stat_metric)}\n')
+    fp.write(f'Data_Loader_Type = {config.data_loader_type}\n')
+    fp.write(f"Regularizer = {config.regularizer}\n")
     fp.write(f"Dataset = {dataset_name}\n")
     fp.write(f"Seed = {SEED}\n")
     fp.write('\n')
@@ -570,7 +615,7 @@ with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
 
 # validation results
 with open(os.path.join(run_dir, 'result_val.json'), 'w') as fp:
-    json.dump(renaming_results(result_test, renaming_luciano_stat), fp,
+    json.dump(renaming_results(result_validation, renaming_luciano_stat), fp,
               indent=4, sort_keys=True)
 
 # test results

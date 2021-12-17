@@ -4,7 +4,7 @@ declare -A datasets_path_name=( ["MOVIELENS_1M"]="ml-1m" ["MOVIELENS_20M"]="ml-2
 declare -A dataset2alpha=( ["MOVIELENS_1M"]="0.01" ["MOVIELENS_20M"]="0.0025" ["CITEULIKE"]="0.05" ["PINTEREST"]="0.05" ["EPINIONS"]="0.1" ["NETFLIX"]="0.0005")
 declare -A dataset2gamma=( ["MOVIELENS_1M"]="53.33" ["MOVIELENS_20M"]="10" ["CITEULIKE"]="6.67" ["PINTEREST"]="10" ["EPINIONS"]="6.67" ["NETFLIX"]="10")
 
-cuda=""
+cuda="1"
 # moving in the parent directory
 cd ../
 declare -a seeds=(12121995 230782 190291 81163 100362)
@@ -60,6 +60,8 @@ for seed in "${seeds[@]}"; do
     rm -rf ./data/${datasets_path_name[$dataset_name]}/preprocessed_data/reweighting
     rm -rf ./data/${datasets_path_name[$dataset_name]}/sparse_matrices/reweighting
     jsonStr=$(cat rvae_config.json)
+    jq '.data_loader_type = ""' <<<"$jsonStr" > rvae_config.json
+    jsonStr=$(cat rvae_config.json)
     jq '.model_type = "model_types.REWEIGHTING"' <<<"$jsonStr" > rvae_config.json
     jsonStr=$(cat rvae_config.json)
     jq '.alpha = "None"' <<<"$jsonStr" > rvae_config.json
@@ -82,7 +84,9 @@ for seed in "${seeds[@]}"; do
       jsonStr=$(cat rvae_config.json)
       jq '.model_type = "model_types.BASELINE"' <<<"$jsonStr" > rvae_config.json
       jsonStr=$(cat rvae_config.json)
-      jq '.regularizer = "'$boratto_reg'"' <<<"$jsonStr" > rvae_config.json
+      jq '.reg_weight = "'$boratto_reg'"' <<<"$jsonStr" > rvae_config.json
+      jsonStr=$(cat rvae_config.json)
+      jq '.regularizer = "boratto"' <<<"$jsonStr" > rvae_config.json
       python rvae.py
     done
     # boratto sampling + reweighting
@@ -93,9 +97,8 @@ for seed in "${seeds[@]}"; do
       jsonStr=$(cat rvae_config.json)
       jq '.model_type = "model_types.BASELINE"' <<<"$jsonStr" > rvae_config.json
       jsonStr=$(cat rvae_config.json)
-      jq '.regularizer = "'$boratto_reg'"' <<<"$jsonStr" > rvae_config.json
+      jq '.reg_weight = "'$boratto_reg'"' <<<"$jsonStr" > rvae_config.json
       python rvae.py
     done
-    # TODO: method based on causal inference
   done
 done
