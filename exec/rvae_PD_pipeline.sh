@@ -1,11 +1,11 @@
 # pick dataset(s) of interest - MOVIELENS_1M MOVIELENS_20M CITEULIKE PINTEREST EPINIONS NETFLIX
-declare -a datasets=("MOVIELENS_1M" "PINTEREST" "CITEULIKE")
+declare -a datasets=("PINTEREST")
 declare -A datasets_path_name=( ["MOVIELENS_1M"]="ml-1m" ["MOVIELENS_20M"]="ml-20m" ["CITEULIKE"]="citeulike-a" ["PINTEREST"]="pinterest" ["EPINIONS"]="epinions" ["NETFLIX"]="netflix")
 
-cuda=""
+cuda="2"
 # moving in the parent directory
 cd ../
-declare -a seeds=(12121995 230782 190291 81163 100362)
+declare -a seeds=(12121995)
 
 for seed in "${seeds[@]}"; do
 

@@ -7,5 +7,7 @@
   "NETFLIX_SAMPLE":"netflix_sample",
   "PINTEREST":"pinterest",
   "YAHOO": "yahoo-r3",
-  "PROD": "LFR_benchmark"
+  "PROD": "LFR_benchmark",
+  "COAT": "coat",
+  "AMAZON_GGF": "amzn-ggf"
 }

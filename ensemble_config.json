@@ -1,6 +1,6 @@
 {
-  "CUDA_VISIBLE_DEVICES": "",
-  "dataset_name": "datasets.PROD",
+  "CUDA_VISIBLE_DEVICES": "2",
+  "dataset_name": "datasets.YAHOO",
   "model_type": "simple",
   "n_epochs": 1,
   "ensemble_weight": 1.0,
@@ -19,7 +19,7 @@
   "optim": "adam",
   "scale": 1000,
   "use_popularity": "True",
-  "p_dims": "[200, 600]",
+  "p_dims": "[64, 200]",
   "decreasing_factor": 1,
   "seed": 12121995
 }
