@@ -23,16 +23,22 @@ for seed in "${seeds[@]}"; do
     jq '.data_loader_type = ""' <<<"$jsonStr" > rvae_config.json
     jsonStr=$(cat rvae_config.json)
     jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > rvae_config.json
-    # training the baseline
-    python rvae.py
-    jsonStr=$(cat rvae_config.json)
-    jq '.model_type = "model_types.LOW"' <<<"$jsonStr" > rvae_config.json
-    # training the low model
-    python rvae.py
+    echo "Current Dataset: "$dataset_name
+    if [ $dataset_name != "AMAZON_GGF" ]; then
+      echo "Training Baseline and Low Models"
+      sleep 10s
+      # training the baseline
+      python rvae.py
+      jsonStr=$(cat rvae_config.json)
+      jq '.model_type = "model_types.LOW"' <<<"$jsonStr" > rvae_config.json
+      # training the low model
+      python rvae.py
+    fi
     for ensemble_weight in $(seq 0.05 0.05 1.0); do
+      echo "Evaluating Ensemble..."
       new_ensemble_weight="${ensemble_weight//,/.}"
       jsonStr=$(cat ensemble_config.json)
-      jq '.ensemble_weight = 'new_ensemble_weight <<<"$jsonStr" > ensemble_config.json
+      jq '.ensemble_weight = '$new_ensemble_weight <<<"$jsonStr" > ensemble_config.json
       jsonStr=$(cat ensemble_config.json)
       jq '.seed = '$seed <<<"$jsonStr" > ensemble_config.json
       jsonStr=$(cat ensemble_config.json)

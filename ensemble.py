@@ -77,7 +77,6 @@ In test the data is reported with 3 masks of items with less, middle and top pop
 trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
                                  device=device)
 
-
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
 thresholds = trainloader.thresholds
@@ -298,6 +297,7 @@ def train_ensemble():
 
     plt.show()
 
+
 # Run
 torch.set_printoptions(profile="full")
 n_epochs = config.n_epochs
@@ -322,10 +322,10 @@ stat_metric = []
 if config.model_type in ('trainable', 'trainable_net'):
     train_ensemble()
 
-
 # Test stats
 model.eval()
 result_test = evaluate(trainloader, 'test')
+result_validation = evaluate(trainloader, 'validation')
 
 print('*** TEST RESULTS ***')
 renaming_luciano_stat = {"loss": "loss", "train_loss": "train_loss"}
@@ -356,6 +356,17 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
 # all results
 with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
     json.dump(stat_metric, fp)
+
+
+# all results
+def renaming_results(result_dict, rename_dict):
+    return {rename_dict[k]: v for k, v in result_dict.items() if k in rename_dict}
+
+
+# validation results
+with open(os.path.join(run_dir, 'result_val.json'), 'w') as fp:
+    json.dump(renaming_results(result_validation, renaming_luciano_stat), fp,
+              indent=4, sort_keys=True)
 
 # test results
 with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
