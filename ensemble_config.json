@@ -1,9 +1,9 @@
 {
-    "CUDA_VISIBLE_DEVICES": "3",
-    "dataset_name": "datasets.AMAZON_GGF",
+    "CUDA_VISIBLE_DEVICES": "2",
+    "dataset_name": "datasets.YAHOO",
     "model_type": "simple",
     "n_epochs": 1,
-    "ensemble_weight": 0.4,
+    "ensemble_weight": 0.2,
     "batch_size": 1024,
     "weight_decay": 0.0,
     "learning_rate": 1e-3,
@@ -21,5 +21,5 @@
     "use_popularity": "True",
     "p_dims": "[200, 600]",
     "decreasing_factor": 1,
-    "seed": 12121995
+    "seed": 81163
   }

@@ -1,5 +1,5 @@
 # pick dataset(s) of interest - MOVIELENS_1M MOVIELENS_20M CITEULIKE PINTEREST EPINIONS NETFLIX YAHOO COAT AMAZON_GGF
-declare -a datasets=("AMAZON_GGF" "MOVIELENS_1M" "CITEULIKE" "PINTEREST" "YAHOO")
+declare -a datasets=("YAHOO")
 declare -A datasets_path_name=( ["MOVIELENS_1M"]="ml-1m" ["MOVIELENS_20M"]="ml-20m" ["CITEULIKE"]="citeulike-a" ["PINTEREST"]="pinterest" ["EPINIONS"]="epinions" ["NETFLIX"]="netflix", ["YAHOO"]="yahoo-r3", ["COAT"]="coat",  ["AMAZON_GGF"]="amzn-ggf")
 cuda="2"
 # moving in the parent directory
@@ -24,7 +24,7 @@ for seed in "${seeds[@]}"; do
     jsonStr=$(cat rvae_config.json)
     jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > rvae_config.json
     echo "Current Dataset: "$dataset_name
-    if [ $dataset_name != "AMAZON_GGF" ]; then
+    if [ $seed != 12121995 ]; then
       echo "Training Baseline and Low Models"
       sleep 10s
       # training the baseline
@@ -34,6 +34,7 @@ for seed in "${seeds[@]}"; do
       # training the low model
       python rvae.py
     fi
+    
     for ensemble_weight in $(seq 0.05 0.05 1.0); do
       echo "Evaluating Ensemble..."
       new_ensemble_weight="${ensemble_weight//,/.}"
