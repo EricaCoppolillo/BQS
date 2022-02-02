@@ -81,7 +81,7 @@ to_pickle = True
 """ Train and test"""
 
 if not config.cached_dataloader:
-    print(f"Model: {model_types.BASELINE}\nData Loader: {config.data_loader_type}")
+    print(f"Model: {model_type}\nData Loader: {config.data_loader_type}")
     if model_type == model_types.BASELINE:
         if config.data_loader_type == "inverse_ppr":
             trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
@@ -282,8 +282,7 @@ def train(dataloader, epoch, optimizer):
             y = torch.einsum('bi, bi -> bi', y, c*pc_weight*n_u/m_u)
 
 
-        loss = criterion.log_p(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask,
-                               model_type=model_type)
+        loss = criterion.log_p(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask, model_type=model_type)
 
         if config.regularizer == "JS":
             foldin_mask = (x == 1).float()
@@ -478,7 +477,7 @@ try:
             best_loss = result['loss']
         '''
         LOW, MED, HIGH = 0, 1, 2
-        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
+        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING, model_types.U_SAMPLING):
             val_result = result["loss"]
             if np.isinf(val_result) or np.isnan(val_result):
                 val_result = -float(result[f"luciano_stat@{config.best_model_k_metric}"])

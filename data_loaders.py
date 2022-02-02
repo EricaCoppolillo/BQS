@@ -13,6 +13,8 @@ from models import *
 from config import Config
 
 model_types = Config("./model_type_info.json")
+ML20M_H_FACTOR = 0.12
+NETFLIX_H_FACTOR = 0.14
 
 
 def rank_simple(vector):
@@ -90,7 +92,7 @@ class DataLoader:
 
         self.n_items = len(self.item_popularity)
         self.use_popularity = self.model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
-                                                  model_types.OVERSAMPLING)
+                                                  model_types.OVERSAMPLING, model_types.U_SAMPLING)
         self.sorted_item_popularity = sorted(self.item_popularity)
         limit = 1
         self.max_popularity = self.sorted_item_popularity[-limit]
@@ -132,6 +134,7 @@ class DataLoader:
                 else:
                     frequencies.append(0)
                     freq_decimal_part.append(0)
+
             counter_for_decimal_part = [int(int(item_popularity[idx] * nusers) * freq_decimal_part[idx]) for idx in
                                         range(len(item_popularity))]  # K_i
             slots_available_for_decimal_part = [int(f_i * nusers) for f_i in item_popularity]  # K
@@ -152,7 +155,8 @@ class DataLoader:
         path = Path(file_tr)
         par_dir = path.parent.absolute()
         if "bpr" in file_tr:
-            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type + self.submodel_type
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr",
+                                                 self.model_type + self.submodel_type
                                                  , f"decreasing_factor_{decreasing_factor}", str(seed))
         else:
             preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type + self.submodel_type
@@ -250,7 +254,8 @@ class DataLoader:
 
         # check if sparse matrices have already been computed
         if "bpr" in file_tr:
-            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", "bpr", self.model_type + self.submodel_type,
+            dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", "bpr",
+                                                   self.model_type + self.submodel_type,
                                                    f"decreasing_factor_{decreasing_factor}", str(seed))
         else:
             dir_for_sparse_matrices = os.path.join(par_dir, "sparse_matrices", self.model_type + self.submodel_type,
@@ -1678,7 +1683,7 @@ class NegativeSamplingDataLoader(DataLoader):
 class BorattoNegativeSamplingDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
         self.init_negative_distr = False
-        self.submodel_type="boratto"
+        self.submodel_type = "boratto"
         super(BorattoNegativeSamplingDataLoader, self).__init__(*args, **kwargs)
 
     def _generate_pairs(self, pos, tag=""):
@@ -1730,7 +1735,7 @@ class BorattoNegativeSamplingDataLoader(DataLoader):
             neg_frequency = frequencies[item_idx]
             less_pop_frequency = neg_frequency // 2
             more_pop_frequency = neg_frequency - less_pop_frequency
-            if more_pop_negs.shape[0] == 0: # case when pos items is more popular than all negative items
+            if more_pop_negs.shape[0] == 0:  # case when pos items is more popular than all negative items
                 less_pop_frequency = neg_frequency
                 more_pop_frequency = 0
             less_pop_sampled_negs = random.choices(less_pop_negs, k=less_pop_frequency)
@@ -2266,3 +2271,725 @@ class PersonalizedPagerankNegativeSamplingDataLoader(InversePersonalizedPagerank
         self.graph_nodes = list(g.nodes())
         self.ppr_scores = {user_id: qt.transform(np.array(user_ppr_scores).reshape(-1, 1)).flatten()
                            for user_id, user_ppr_scores in all_ppr_scores.items()}
+
+
+class BprDataLoader:
+    def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100,
+                 alpha=None, gamma=None):
+        try:
+            print(self.submodel_type)
+        except:
+            self.submodel_type = ""
+        self.file_tr = file_tr
+        dataset = load_dataset(file_tr)
+        self.n_users = dataset["users"]
+        self.item_popularity = dataset['popularity']
+        self.item_popularity_dict = dataset['popularity_dict']
+
+        self.n_users_dict = {"training": len(dataset["training_data"]), "validation": len(dataset["validation_data"]),
+                             "test": len(dataset["test_data"])}
+        self.absolute_item_popularity_dict = {split_type: [elem * self.n_users_dict[split_type]
+                                                           for elem in dataset['popularity_dict'][split_type]]
+                                              for split_type in dataset['popularity_dict']
+                                              }
+        self.thresholds = dataset['thresholds']
+        self.absolute_thresholds = list(map(lambda x: x * self.n_users_dict["training"], self.thresholds))
+
+        self.pos_neg_ratio = pos_neg_ratio
+        self.negatives_in_test = negatives_in_test
+        self.model_type = model_type
+
+        # IMPROVEMENT
+        self.low_pop = len([i for i in self.item_popularity_dict["training"] if i <= self.thresholds[0]])
+        self.med_pop = len(
+            [i for i in self.item_popularity_dict["training"] if self.thresholds[0] < i <= self.thresholds[1]])
+        self.high_pop = len([i for i in self.item_popularity_dict["training"] if self.thresholds[1] < i])
+
+        # compute the Beta parameter according to the item popularity
+        if self.model_type == model_types.REWEIGHTING:
+            self.absolute_item_popularity = np.array(self.absolute_item_popularity_dict["training"])
+            # Beta is defined as the average popularity of the medium-popular class of items
+            self.beta = self.absolute_item_popularity[(self.absolute_item_popularity >= self.absolute_thresholds[0]) &
+                                                      (self.absolute_item_popularity < self.absolute_thresholds[
+                                                          1])].mean()
+            assert self.beta > 0, self.absolute_thresholds
+            self.gamma = gamma
+            self.alpha = alpha
+            assert (not alpha or not gamma) or (alpha > 0 and gamma > 0), alpha
+
+        self.n_items = len(self.item_popularity)
+        self.use_popularity = self.model_type in (model_types.LOW, model_types.MED, model_types.HIGH,
+                                                  model_types.OVERSAMPLING, model_types.U_SAMPLING)
+        self.is_weighted_model = model_type == model_types.REWEIGHTING
+        self.sorted_item_popularity = sorted(self.item_popularity)
+        self.max_popularity = self.sorted_item_popularity[-1]
+        self.min_popularity = self.sorted_item_popularity[0]
+
+        self.decreasing_factor = decreasing_factor
+        n = self.pos_neg_ratio
+        self.frequencies_dict = {}
+        self.freq_decimal_part_dict = {}
+        self.counter_for_decimal_part_dict = {}
+        self.slots_available_for_decimal_part_dict = {}
+        for split_type in ["training", "validation", "test"]:
+            frequencies = []
+            freq_decimal_part = []
+            item_popularity = self.item_popularity_dict[split_type]
+            nusers = self.n_users_dict[split_type]
+            # computing item ranking
+            item_ranking = rankdata(item_popularity)
+            max_popularity = max(item_popularity)
+
+            for idx in range(len(item_popularity)):
+                f_i = item_popularity[idx]
+                h = 1
+                if "ml-20m" in self.file_tr:
+                    h = ML20M_H_FACTOR
+                if "netflix" in self.file_tr:
+                    h = NETFLIX_H_FACTOR
+                d_i = ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
+                if f_i > 0:
+                    if self.model_type == model_types.OVERSAMPLING:
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    else:
+                        d_i = self.decreasing_factor
+                        n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
+                    frequencies.append(int(n_int))
+                    freq_decimal_part.append(n_i_decimal)
+                else:
+                    frequencies.append(0)
+                    freq_decimal_part.append(0)
+
+            counter_for_decimal_part = [int(int(item_popularity[idx] * nusers) * freq_decimal_part[idx]) for idx in
+                                        range(len(item_popularity))]  # K_i
+            slots_available_for_decimal_part = [int(f_i * nusers) for f_i in item_popularity]  # K
+
+            self.frequencies_dict[split_type] = frequencies
+            self.freq_decimal_part_dict[split_type] = freq_decimal_part
+            self.counter_for_decimal_part_dict[split_type] = counter_for_decimal_part
+            self.slots_available_for_decimal_part_dict[split_type] = slots_available_for_decimal_part
+
+        self.item_visibility_dict = {split_type: [0] * len(self.item_popularity_dict[split_type])
+                                     for split_type in ["training", "validation", "test"]}
+        self.max_width = -1
+
+        # WEIGHTING
+        if self.is_weighted_model:
+            if self.alpha is not None:
+                def inverse_sigmoid_weight(item_pop, _alpha=0.01, _beta=0.002, _gamma=100):
+                    return (_gamma + 1) * ((_gamma * (1 + np.exp(_alpha * (item_pop - _beta - 1))) ** -1 + 1) / (
+                            _gamma * (1 + np.exp(-_alpha * _beta)) ** -1 + 1))
+
+                self.w_i = [inverse_sigmoid_weight(elem, _alpha=self.alpha, _beta=self.beta, _gamma=self.gamma)
+                            for elem in self.absolute_item_popularity]
+            else:
+                self.w_i = [1 / elem for elem in self.absolute_item_popularity]
+
+        print('phase 1: Loading data...')
+        self._initialize(file_tr, dataset, decreasing_factor, seed)
+
+        # save item exposure and popularity
+        base_path = file_tr[:-9]
+        if not os.path.exists(os.path.join(base_path, "item_pop.pkl")):
+            with open(os.path.join(base_path, "item_pop.pkl"), 'wb') as handle:
+                pickle.dump(self.absolute_item_popularity_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if self.model_type == model_types.BASELINE:
+            add_term = "_B"
+        else:
+            add_term = ""
+        if not os.path.exists(os.path.join(base_path, f"item_exposure{add_term}.pkl")):
+            with open(os.path.join(base_path, f"item_exposure{add_term}.pkl"), 'wb') as handle:
+                pickle.dump(self.item_visibility_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        print('Done.')
+
+    def _initialize(self, file_tr, dataset, decreasing_factor, seed):
+        self.train_data = []
+        self.val_data_tr = []
+        self.val_data_te = []
+        self.test_data_tr = []
+        self.test_data_te = []
+        self.size = dict()
+
+        # checking if data have already been computed
+        path = Path(file_tr)
+        par_dir = path.parent.absolute()
+
+        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr",
+                                             self.model_type + self.submodel_type
+                                             , f"decreasing_factor_{decreasing_factor}", str(seed))
+        print(preprocessed_data_dir)
+        if not os.path.exists(preprocessed_data_dir):
+            os.makedirs(preprocessed_data_dir)
+
+        def _dir_does_not_contain_files(input_path):
+            return len(os.listdir(input_path)) == 0
+
+        if _dir_does_not_contain_files(preprocessed_data_dir):
+            print("Generating pre-processed data from scratch")
+            self._load_data(dataset)
+
+            self.size['train'] = len(self.train_data)
+            self.size['validation'] = len(self.val_data_te)
+            self.size['test'] = len(self.test_data_te)
+
+            # saving artifacts on disk
+            with open(os.path.join(preprocessed_data_dir, 'bpr_cache.pkl'), 'wb') as f:
+                data = (self.train_data, self.val_data_tr, self.val_data_te, self.test_data_tr, self.test_data_te)
+                pickle.dump(data, f)
+            with open(os.path.join(preprocessed_data_dir, 'bpr_sizes.pkl'), 'wb') as f:
+                pickle.dump(self.size, f)
+        else:
+            print("Loading pre-processed data from disk")
+
+            with open(os.path.join(preprocessed_data_dir, 'bpr_cache.pkl'), 'rb') as f:
+                data = pickle.load(f)
+            self.train_data, self.val_data_tr, self.val_data_te, self.test_data_tr, self.test_data_te = data
+
+            with open(os.path.join(preprocessed_data_dir, 'bpr_sizes.pkl'), 'rb') as f:
+                self.size = pickle.load(f)
+
+        print('Size:')
+        print(f'train size = {len(self.train_data)}')
+        print(f'val tr size = {len(self.val_data_tr)}')
+        print(f'val te size = {len(self.val_data_te)}')
+        print(f'test tr size = {len(self.test_data_tr)}')
+        print(f'test te size = {len(self.test_data_te)}')
+
+        # convert
+        self.train_data = np.array(self.train_data)
+        self.val_data_tr = np.array(self.val_data_tr)
+        self.test_data_tr = np.array(self.test_data_tr)
+
+    def get_size(self):
+        return len(self.train_data)
+
+    def _add_train_data(self, triplet_list):
+        self.train_data.extend(triplet_list)
+
+    def _add_val_data(self, triplet_list_tr, triplet_list_te):
+        self.train_data.extend(triplet_list_tr)
+        self.val_data_tr.extend(triplet_list_tr)
+        self.val_data_te.extend(triplet_list_te)
+
+    def _add_test_data(self, triplet_list_tr, triplet_list_te):
+        self.train_data.extend(triplet_list_tr)
+        self.test_data_tr.extend(triplet_list_tr)
+        self.test_data_te.extend(triplet_list_te)
+
+    def _load_data(self, dataset):
+        training_data = dataset['training_data']
+        validation_data = dataset['validation_data']
+        test_data = dataset['test_data']
+
+        print('LEN TEST:', len(test_data.keys()))
+
+        is_low_model = self.model_type == model_types.LOW
+        is_med_model = self.model_type == model_types.MED
+        is_high_model = self.model_type == model_types.HIGH
+
+        for user_id in tqdm(training_data):
+            pos, neg = training_data[user_id]
+            assert len(neg) >= 1, f'fail train neg for user {user_id}'
+
+            if is_low_model:
+                pos = [x for x in pos if self.item_popularity_dict["training"][x] <= self.thresholds[0]]
+            elif is_med_model:
+                pos = [x for x in pos if
+                       self.thresholds[0] < self.item_popularity_dict["training"][x] <= self.thresholds[1]]
+            elif is_high_model:
+                pos = [x for x in pos if self.item_popularity_dict["training"][x] > self.thresholds[1]]
+
+            pos, neg = self._generate_pairs(pos, tag="training")
+
+            self._add_train_data([[user_id, p, n] for p, n in zip(pos, neg)])
+
+        for user_id in tqdm(validation_data):
+            positives_tr, positives_te, negatives_sampled = validation_data[user_id]
+            if len(positives_te) == 0:
+                continue
+
+            assert len(negatives_sampled) >= 1, f'fail valid neg for user {user_id}'
+
+            pos, neg = self._generate_pairs(positives_tr, tag="validation")
+
+            self._add_val_data([[user_id, p, n] for p, n in zip(pos, neg)],
+                               [[user_id, positives_te, negatives_sampled]])
+
+        for user_id in tqdm(test_data):
+            positives_tr, positives_te, negatives_sampled = test_data[user_id]
+            if len(positives_te) == 0:
+                continue
+
+            assert len(negatives_sampled) >= 1, f'fail test neg for user {user_id}'
+
+            pos, neg = self._generate_pairs(positives_tr, tag="test")
+
+            self._add_test_data([[user_id, p, n] for p, n in zip(pos, neg)],
+                                [[user_id, positives_te, negatives_sampled]])
+
+    def _sample_negatives(self, pos, size):
+        all_items = set(range(len(self.item_popularity)))
+        all_negatives = list(all_items - set(pos))
+
+        return random.choices(all_negatives, k=size)
+
+    def _generate_pairs(self, pos, tag=""):
+        # IMPROVEMENT
+        positives = []
+        for item in pos:
+            if self.use_popularity:
+                frequency = self.frequencies_dict[tag][item]
+            else:
+                frequency = self.pos_neg_ratio
+            if self.counter_for_decimal_part_dict[tag][item] > 0:
+                if self.slots_available_for_decimal_part_dict[tag][item] - self.counter_for_decimal_part_dict[tag][
+                    item] <= 0 or random.random() < self.freq_decimal_part_dict[tag][item]:
+                    frequency += 1
+                    self.counter_for_decimal_part_dict[tag][item] -= 1
+                self.slots_available_for_decimal_part_dict[tag][item] -= 1
+
+            self.item_visibility_dict[tag][item] += frequency
+            positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
+
+        negatives = self._sample_negatives(pos, len(positives))
+        self.max_width = max(self.max_width, len(negatives))
+
+        return positives, negatives
+
+    def iter(self, batch_size=256, tag='train'):
+        """
+        Iter on data
+        :param batch_size: size of the batch
+        :param tag: tag in {train, validation, test} tells you from which sample to extract data
+        :return: triplet_list, mask
+        """
+
+        assert (tag in ('train', 'validation', 'test'))
+
+        if tag == 'train':
+            data = self.train_data
+        elif tag == 'validation':
+            data = self.val_data_tr
+        elif tag == 'test':
+            data = self.test_data_tr
+
+        fixed_mask = np.ones(batch_size)
+
+        idxlist = np.arange(len(data))
+        np.random.shuffle(idxlist)
+        N = idxlist.shape[0]
+        for start_idx in range(0, N, batch_size):
+            end_idx = min(start_idx + batch_size, N)
+            raw_idxs = idxlist[start_idx:end_idx]
+
+            triplets = data[raw_idxs]
+            if not self.is_weighted_model:
+                mask = fixed_mask if raw_idxs.shape[0] == fixed_mask.shape[0] else fixed_mask[0:raw_idxs.shape[0]]
+            else:
+                mask = np.array([self.w_i[i[1]] for i in triplets])
+
+            yield triplets, mask
+
+    def iter_test(self, batch_size=256, tag='test'):
+        """
+        Iter on test data
+        :param batch_size: batch size
+        :param tag: tag in ('validation', 'test')
+        :return: positives, negatives
+        """
+
+        assert tag in ('validation', 'test'), f'tag is not valid: {tag}'
+
+        if tag == 'validation':
+            data = self.val_data_te
+        elif tag == 'test':
+            data = self.test_data_te
+
+        # for user_id, positives, negatives in data:
+        #     yield user_id, positives, negatives
+
+        N = len(data)
+        for start_idx in range(0, N, batch_size):
+            end_idx = min(start_idx + batch_size, N)
+            sublist = data[start_idx:end_idx]
+
+            user_id = [i for i, _, _ in sublist]
+            positives = [i for _, i, _ in sublist]
+            negatives = [i for _, _, i in sublist]
+
+            yield user_id, positives, negatives
+
+
+class CachedBprDataLoader(BprDataLoader):
+
+    def __del__(self):
+        self._db.close()
+
+    def _initialize(self, file_tr, dataset, decreasing_factor, seed):
+        # checking if data have already been computed
+        path = Path(file_tr)
+        par_dir = path.parent.absolute()
+        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type
+                                             , f"decreasing_factor_{decreasing_factor}", str(seed))
+
+        if not os.path.exists(preprocessed_data_dir):
+            os.makedirs(preprocessed_data_dir)
+
+        cache_file = f'{preprocessed_data_dir}/bpr_cache.db'
+        init_db = not os.path.exists(cache_file)
+
+        self._db = sqlite3.connect(cache_file)
+        self.size = dict()
+
+        if init_db:
+            print("Generating pre-processed data from scratch")
+            self._init_cache()
+
+            self._cnt_train = 0
+            self._cnt_valid = 0
+            self._cnt_test = 0
+
+            self._batch_train = []
+            self._batch_valid = []
+            self._batch_test = []
+
+            self._load_data(dataset)
+
+            self.size['train'] = self.get_size('training')
+            self.size['validation'] = self.get_size('validation')
+            self.size['test'] = self.get_size('testset')
+
+            self._cur.execute('INSERT INTO config VALUES (?, ?)', (1, json.dumps(self.size)))
+
+            self._add_train_data([], True)
+            self._add_val_data([], [], True)
+            self._add_test_data([], [], True)
+
+            self._db.commit()
+            self._cur.close()
+
+            self._batch_train = None
+            self._batch_valid = None
+            self._batch_test = None
+        else:
+            print("Loading pre-processed data from disk")
+
+            cur = self._db.cursor()
+            cur.execute('SELECT data FROM config WHERE id = 1')
+
+            self.size = json.loads(cur.fetchone()[0])
+
+            cur.close()
+
+    def _init_cache(self):
+        self._cur = self._db.cursor()
+
+        ### TABLE
+        # the id are 1-based
+        self._cur.executescript('''
+    CREATE TABLE config (
+      "id" integer NOT NULL,
+      "data" TEXT,
+      PRIMARY KEY ("id")
+    );
+    CREATE TABLE training (
+      "id" integer NOT NULL,
+      "data_tr" blob,
+      PRIMARY KEY ("id")
+    );
+    CREATE TABLE validation (
+      "id" integer NOT NULL,
+      "data_tr" blob,
+      "data_te" blob,
+      PRIMARY KEY ("id")
+    );
+    CREATE TABLE testset (
+      "id" integer NOT NULL,
+      "data_tr" blob,
+      "data_te" blob,
+      PRIMARY KEY ("id")
+    );''')
+
+        self._db.commit()
+
+    def get_size(self, tablename='training'):
+        cur = self._db.cursor()
+        cur.execute(f'SELECT COUNT(*) FROM {tablename}')
+
+        n = cur.fetchone()[0]
+
+        cur.close()
+
+        return n
+
+    def _add_train_data(self, triplet_list, force_insert=False):
+        for x in triplet_list:
+            self._cnt_train += 1
+            self._batch_train.append((self._cnt_train, pickle.dumps(x)))
+
+        if self._cnt_train % 1000 == 0 or force_insert:
+            if self._batch_train:
+                self._cur.executemany('INSERT INTO training VALUES(?,?)', self._batch_train)
+                self._db.commit()
+                self._batch_train.clear()
+
+    def _add_val_data(self, triplet_list_tr, triplet_list_te, force_insert=False):
+        for x1, x2 in zip(triplet_list_tr, triplet_list_te):
+            self._cnt_valid += 1
+            self._batch_valid.append((self._cnt_valid, pickle.dumps(x1), pickle.dumps(x2)))
+
+        if self._cnt_valid % 1000 == 0 or force_insert:
+            if self._batch_valid:
+                self._cur.executemany('INSERT INTO validation VALUES(?,?,?)', self._batch_valid)
+                self._db.commit()
+                self._batch_valid.clear()
+
+    def _add_test_data(self, triplet_list_tr, triplet_list_te, force_insert=False):
+        for x1, x2 in zip(triplet_list_tr, triplet_list_te):
+            self._cnt_test += 1
+            self._batch_test.append((self._cnt_test, pickle.dumps(x1), pickle.dumps(x2)))
+
+        if self._cnt_valid % 1000 == 0 or force_insert:
+            if self._batch_test:
+                self._cur.executemany('INSERT INTO testset VALUES(?,?,?)', self._batch_test)
+                self._db.commit()
+                self._batch_test.clear()
+
+    def iter(self, batch_size=256, tag='train'):
+        """
+        Iter on data
+        :param batch_size: size of the batch
+        :param tag: tag in {train, validation, test} tells you from which sample to extract data
+        :return: triplet_list, mask
+        """
+        assert (tag in ('train', 'validation', 'test'))
+
+        tablename = 'validation'
+        if tag == 'train':
+            tablename = 'training'
+        elif tag == 'test':
+            tablename = 'testset'
+
+        fixed_mask = np.ones(batch_size)
+
+        cur = self._db.cursor()
+        n_users = cur.execute(f'SELECT COUNT(*) AS cnt FROM {tablename}').fetchone()[0]
+
+        idxlist = np.arange(1, n_users + 1)
+        np.random.shuffle(idxlist)
+        N = idxlist.shape[0]
+        for start_idx in range(0, N, batch_size):
+            end_idx = min(start_idx + batch_size, N)
+            raw_idxs = idxlist[start_idx:end_idx]
+
+            x = []
+
+            id_params = ",".join([str(i) for i in raw_idxs])
+            for row in cur.execute(f'SELECT data_tr FROM {tablename} WHERE id IN ({id_params})'):
+                x.append(pickle.loads(row[0]))
+
+            assert len(x) > 0
+
+            triplets = np.array(x)
+            if not self.is_weighted_model:
+                mask = fixed_mask if raw_idxs.shape[0] == fixed_mask.shape[0] else fixed_mask[0:raw_idxs.shape[0]]
+            else:
+                mask = np.array([self.w_i[i[1]] for i in triplets])
+
+            yield triplets, mask
+
+        cur.close()
+
+    def iter_test(self, batch_size=256, tag='test'):
+        """
+        Iter on test data
+        :param batch_size: batch size
+        :param tag: tag in ('validation', 'test')
+        :return: positives, negatives
+        """
+        assert tag in ('validation', 'test'), f'tag is not valid: {tag}'
+
+        tablename = 'validation' if tag != 'test' else 'testset'
+
+        cur = self._db.cursor()
+        n_users = cur.execute(f'SELECT COUNT(*) AS cnt FROM {tablename}').fetchone()[0]
+
+        idxlist = np.arange(1, n_users + 1)
+        N = idxlist.shape[0]
+
+        for start_idx in range(0, N, batch_size):
+            end_idx = min(start_idx + batch_size, N)
+            raw_idxs = idxlist[start_idx:end_idx]
+
+            user_id, positives, negatives = [], [], []
+
+            id_params = ",".join([str(i) for i in raw_idxs])
+            for row in cur.execute(f'SELECT data_te FROM {tablename} WHERE id IN ({id_params})'):
+                a, b, c = pickle.loads(row[0])
+                user_id.append(a)
+                positives.append(b)
+                negatives.append(c)
+
+            assert len(user_id) > 0
+
+            yield user_id, positives, negatives
+
+        cur.close()
+
+
+class EnsembleBprDataLoader(BprDataLoader):
+    def __init__(self, data_dir, p_dims, seed, decreasing_factor, model_type=model_types.BASELINE,
+                 pos_neg_ratio=4, negatives_in_test=100, alpha=None,
+                 gamma=None, config=None, device='cpu'):
+        file_tr = os.path.join(data_dir, f'data_{config.algorithm}')
+        super().__init__(file_tr, seed, decreasing_factor, model_type,
+                         pos_neg_ratio, negatives_in_test, alpha, gamma)
+
+        # loading models
+        print('Loading ensemble models...')
+        first_model, second_model = model_types.BASELINE, model_types.LOW
+        baseline_dir = os.path.join(data_dir, 'bpr', first_model)
+        popularity_dir = os.path.join(data_dir, 'bpr', second_model)
+
+        baseline_file_model = os.path.join(baseline_dir, 'best_model.pth')
+        popularity_file_model = os.path.join(popularity_dir, 'best_model.pth')
+
+        self.baseline_model = BPR(n_users=self.n_users, n_items=self.n_items, n_factors=config.latent_dim)
+        self.baseline_model.load_state_dict(torch.load(baseline_file_model, map_location=device))
+        print(f"Loaded {first_model} model from {baseline_file_model}")
+
+        self.popularity_model = BPR(n_users=self.n_users, n_items=self.n_items, n_factors=config.latent_dim)
+        self.popularity_model.load_state_dict(torch.load(popularity_file_model, map_location=device))
+        print(f"Loaded {second_model} model from {popularity_file_model}")
+
+        self.baseline_model = self.baseline_model.to(device)
+        self.popularity_model = self.popularity_model.to(device)
+        self.baseline_model.eval()
+        self.popularity_model.eval()
+
+        print('ensemble models loaded!')
+
+    def iter_ensemble(self, batch_size=256, tag='train', model_type="bpr", device="cpu"):
+        raise NotImplemented()
+
+    def iter_test_ensemble(self, batch_size=256, tag='test', model_type="bpr", device="cpu"):
+        all_items = torch.arange(0, self.n_items, device=device, dtype=torch.long)
+        all_items = all_items.repeat(batch_size, 1)
+
+        for batch_idx, (user_id, positives, negatives) in enumerate(
+                self.iter_test(batch_size=batch_size, tag=tag)):
+
+            user = torch.tensor(user_id, device=device)
+
+            if user.shape[0] != all_items.shape[0]:
+                all_items = all_items[0:user.shape[0]]
+
+            y_a = self.baseline_model.score(user, all_items)
+            y_b = self.popularity_model.score(user, all_items)
+
+            # yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te, y_a.detach(), y_b.detach()
+            yield None, None, None, None, positives, negatives, None, y_a.detach(), y_b.detach()
+
+
+class BprJannachDataLoader(BprDataLoader):
+    def __init__(self, width_param, *args, **kwargs):
+        self.width_param = width_param
+        self.init_numpy_dict = False
+        self.submodel_type = "jannach"
+        super(BprJannachDataLoader, self).__init__(*args, **kwargs)
+
+    def _generate_pairs(self, pos, tag=""):
+        if not self.init_numpy_dict:
+            self.item_popularity_numpy_dict = {tag: np.array(self.item_popularity_dict[tag])
+                                               for tag in self.item_popularity_dict}
+            self.item_popularity_numpy = np.array(self.item_popularity)
+            self.init_numpy_dict = True
+        # order the list of positives by popularity (ascending)
+        pos_in_popularity_asc_order = [x for _, x in sorted(zip(self.item_popularity_numpy_dict[tag][pos], pos),
+                                                            key=lambda pair: pair[0])]
+        no_of_samples = len(pos_in_popularity_asc_order) * self.pos_neg_ratio
+        sampled_idxs = [min(floor(abs(x)), len(pos_in_popularity_asc_order) - 1) for x in
+                        norm.rvs(loc=0, scale=len(pos_in_popularity_asc_order) / self.width_param,
+                                 size=no_of_samples)]
+        positives = [pos_in_popularity_asc_order[idx] for idx in sampled_idxs]
+
+        negatives = self._sample_negatives(pos, len(positives))
+        self.max_width = max(self.max_width, len(negatives))
+
+        return positives, negatives
+
+    def _sample_negatives(self, pos, size):
+        all_items = set(range(len(self.item_popularity)))
+        neg = list(all_items - set(pos))
+        neg_in_popularity_desc_order = [x for _, x in sorted(zip(self.item_popularity_numpy[neg], neg),
+                                                             key=lambda pair: -pair[0])]
+        sampled_idxs = [min(floor(abs(x)), len(neg_in_popularity_desc_order) - 1) for x in
+                        norm.rvs(loc=0, scale=len(neg_in_popularity_desc_order) / self.width_param,
+                                 size=size)]
+        return [neg_in_popularity_desc_order[idx] for idx in sampled_idxs]
+
+
+class BprBorattoNegativeSamplingDataLoader(BprDataLoader):
+    def __init__(self, *args, **kwargs):
+        self.init_negative_distr = False
+        self.submodel_type = "boratto"
+        super(BprBorattoNegativeSamplingDataLoader, self).__init__(*args, **kwargs)
+
+    def _generate_pairs(self, pos, tag=""):
+        if not self.init_negative_distr:
+            self.numpy_pop = np.array(self.item_popularity_dict["training"])
+            self.init_negative_distr = True
+
+        # IMPROVEMENT
+        positives = []
+        frequencies = []
+        for item in pos:
+            if self.use_popularity:
+                frequency = self.frequencies_dict[tag][item]
+            else:
+                frequency = self.pos_neg_ratio
+            if self.counter_for_decimal_part_dict[tag][item] > 0:
+                if self.slots_available_for_decimal_part_dict[tag][item] - self.counter_for_decimal_part_dict[tag][
+                    item] <= 0 or random.random() < self.freq_decimal_part_dict[tag][item]:
+                    frequency += 1
+                    self.counter_for_decimal_part_dict[tag][item] -= 1
+                self.slots_available_for_decimal_part_dict[tag][item] -= 1
+
+            self.item_visibility_dict[tag][item] += frequency
+            positives[0:0] = [item] * frequency  # append at the beginning (pre-pend)
+            frequencies[0:0] = [frequency]
+
+        negatives = self._sample_negatives(pos, frequencies)
+        self.max_width = max(self.max_width, len(positives))
+
+        return positives, negatives
+
+    def _sample_negatives(self, pos, frequencies):
+        size = sum(frequencies)
+        # select negatives based on the popularity
+        all_items = set(range(len(self.item_popularity)))
+        neg = np.array(list(all_items - set(pos)))
+        negatives = []
+        for item_idx in range(len(frequencies)):
+            pos_item = pos[item_idx]
+            pos_popularity = self.numpy_pop[pos_item]
+            # half of the negatives are less popular than the positive while the rest is more popular
+            neg_popularities = self.numpy_pop[neg]
+            max_pop = max(neg_popularities)
+            less_pop_negs = neg[neg_popularities <= pos_popularity]
+            more_pop_negs = neg[neg_popularities > pos_popularity]
+            if pos_popularity >= max_pop:
+                less_pop_negs = neg[neg_popularities < pos_popularity]
+                more_pop_negs = neg[neg_popularities >= pos_popularity]
+            neg_frequency = frequencies[item_idx]
+            less_pop_frequency = neg_frequency // 2
+            more_pop_frequency = neg_frequency - less_pop_frequency
+            if more_pop_negs.shape[0] == 0:  # case when pos items is more popular than all negative items
+                less_pop_frequency = neg_frequency
+                more_pop_frequency = 0
+            less_pop_sampled_negs = random.choices(less_pop_negs, k=less_pop_frequency)
+            more_pop_sampled_negs = random.choices(more_pop_negs, k=more_pop_frequency)
+            sampled_negatives = less_pop_sampled_negs + more_pop_sampled_negs
+            negatives[0:0] = sampled_negatives
+        return negatives

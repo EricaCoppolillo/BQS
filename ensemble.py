@@ -1,8 +1,9 @@
 import time
+import sys
 
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
-from data_loaders import EnsembleDataLoader
+from data_loaders import EnsembleDataLoader, EnsembleBprDataLoader
 from models import EnsembleMultiVAE, EnsembleMultiVAETrainable, EnsembleMultiVAENet
 from loss_func import ensemble_rvae_rank_pair_loss, ensemble_rvae_focal_loss
 from config import Config
@@ -18,13 +19,17 @@ import seaborn as sns
 sns.set()
 
 # SETTINGS ------------------------------------------
-config = Config("./ensemble_config.json")
+path_to_config = sys.argv[1] # "./ensemble_config.json"
+config = Config(path_to_config)
 datasets = Config("./datasets_info.json")
-os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
 dataset_name = eval(config.dataset_name)
+config.latent_dim = eval(config.latent_dim)
 config.metrics_scale = eval(config.metrics_scale)
 config.use_popularity = eval(config.use_popularity)
 config.p_dims = eval(config.p_dims)
+config.algorithm = config.algorithm if 'algorithm' in config.__dict__ else 'rvae'
 # ---------------------------------------------------
 
 # set seed for experiment reproducibility
@@ -46,9 +51,13 @@ else:
 data_dir = os.path.expanduser('./data')
 
 data_dir = os.path.join(data_dir, dataset_name)
-dataset_file = os.path.join(data_dir, 'data_rvae')
+dataset_file = os.path.join(data_dir, f'data_{config.algorithm}')
 
-result_dir = os.path.join(data_dir, 'results')
+if config.algorithm == 'rvae':
+    result_dir = os.path.join(data_dir, 'results')
+else:
+    result_dir = os.path.join(data_dir, 'bpr/results')
+
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
@@ -74,8 +83,13 @@ In test the data is reported with 3 masks of items with less, middle and top pop
 """
 
 # Dataloader
-trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                 device=device)
+if config.algorithm == 'rvae':
+    trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                 device=device, config=config)
+else:
+    trainloader = EnsembleBprDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                 device=device, config=config)
+
 
 n_items = trainloader.n_items
 config.p_dims.append(n_items)
@@ -97,30 +111,45 @@ def evaluate(dataloader, tag='validation'):
     result['train_loss'] = 0
     result['loss'] = 0
 
+    bs = config.batch_size
+    if config.algorithm == 'bpr' and n_items > 20_000:
+        bs = 16
+
     with torch.no_grad():
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
-                dataloader.iter_test_ensemble(batch_size=config.batch_size, tag=tag, device=device)):
-            x_tensor = naive_sparse2tensor(x).to(device)
-            mask = naive_sparse2tensor(mask).to(device)
-            mask_te = naive_sparse2tensor(mask_te).to(device)
-            pos = naive_sparse2tensor(pos).to(device)
-            neg = naive_sparse2tensor(neg).to(device)
-
+                dataloader.iter_test_ensemble(batch_size=bs,
+                                              model_type=config.algorithm,
+                                              tag=tag, device=device)):
             batch_num += 1
-            n_users_train += x_tensor.shape[0]
 
-            x_input = x_tensor * (1 - mask_te)
+            if config.algorithm == 'rvae':
+                x_tensor = naive_sparse2tensor(x).to(device)
+                mask = naive_sparse2tensor(mask).to(device)
+                mask_te = naive_sparse2tensor(mask_te).to(device)
+                pos = naive_sparse2tensor(pos).to(device)
+                neg = naive_sparse2tensor(neg).to(device)
+
+                x_input = x_tensor * (1 - mask_te)
+                n_users_train += x_tensor.shape[0]
+            else:
+                x_input = None
+                n_users_train += y_a.shape[0]
 
             y = model(x_input, y_a, y_b)
 
-            loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
-            # print("[EVAL]: Loss computed")
-            result['loss'] += loss.item()
+            if config.algorithm == 'rvae':
+                loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask)
+                result['loss'] += loss.item()
 
             recon_batch_cpu = y.cpu().numpy()
 
+            del y_a, y_b, y
+
+            if x_input:
+                x_input = x_input.cpu().numpy()
+
             for k in top_k:
-                accumulator.compute_metric(x_input.cpu().numpy(),
+                accumulator.compute_metric(x_input,
                                            recon_batch_cpu,
                                            pos_te, neg_te,
                                            popularity,
@@ -152,7 +181,7 @@ def train(dataloader, epoch, optimizer):
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
     for batch_idx, (x, pos, neg, mask, y_a, y_b) in enumerate(dataloader.iter_ensemble(
-            batch_size=config.batch_size, device=device)):
+            batch_size=config.batch_size, model_type=config.algorithm,device=device)):
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
@@ -297,7 +326,6 @@ def train_ensemble():
 
     plt.show()
 
-
 # Run
 torch.set_printoptions(profile="full")
 n_epochs = config.n_epochs
@@ -321,6 +349,7 @@ stat_metric = []
 # TRAIN
 if config.model_type in ('trainable', 'trainable_net'):
     train_ensemble()
+
 
 # Test stats
 model.eval()
@@ -357,15 +386,9 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
 with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
     json.dump(stat_metric, fp)
 
-
-# all results
-def renaming_results(result_dict, rename_dict):
-    return {rename_dict[k]: v for k, v in result_dict.items() if k in rename_dict}
-
-
 # validation results
 with open(os.path.join(run_dir, 'result_val.json'), 'w') as fp:
-    json.dump(renaming_results(result_validation, renaming_luciano_stat), fp,
+    json.dump({renaming_luciano_stat[k]: v for k, v in result_validation.items() if k in renaming_luciano_stat}, fp,
               indent=4, sort_keys=True)
 
 # test results

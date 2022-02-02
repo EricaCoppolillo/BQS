@@ -108,7 +108,7 @@ class MetricAccumulator:
         - weighted hit rate
         - hitrate per popularity
 
-        :param x: user preferences, BS x items
+        :param x: user preferences, BS x items, if None then no warmup data is used
         :param y: user predictions, BS x items
         :param pos: list of positives
         :param neg: list of negatives
@@ -121,13 +121,18 @@ class MetricAccumulator:
         assert len(popularity) == y.shape[-1], f'{len(popularity)} != {y.shape[-1]}'
 
         for user in range(y.shape[0]):
-
-            input_idx = np.where(x[user, :] == 1)[0]  # indice degli oggetti in input per l'utente user
             score = y[user, :]  # score degli oggetti
 
-            viewed_item = set(input_idx)
+            if x is not None:
+                input_idx = np.where(x[user, :] == 1)[0]  # indice degli oggetti in input per l'utente user
+                viewed_item = set(input_idx)
+                score[input_idx] = - np.inf  # hide viewed
+            else:
+                viewed_item = set()
+
+
             positive_items = set(pos[user])
-            score[input_idx] = - np.inf  # hide viewed
+
             predicted_item = positive_items - viewed_item  # si considerano solo gli oggetti non forniti in input
             # TODO: assert positive_items intersection viewed_item is 0
             ranked_idx = np.argsort(-score)  # indici degli items ordinati per score in modo decrescente

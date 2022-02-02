@@ -4,5 +4,6 @@
   "MED": "medium",
   "HIGH": "high",
   "OVERSAMPLING": "oversampling",
-  "REWEIGHTING": "reweighting"
+  "REWEIGHTING": "reweighting",
+  "U_SAMPLING": "uniform"
 }

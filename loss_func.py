@@ -6,31 +6,20 @@ model_types = Config("./model_type_info.json")
 
 
 class bpr_loss(nn.Module):
-    def __init__(self, popularity=None, scale=1., beta=1., thresholds=None, frequencies=None, device="cpu"):
+    def __init__(self, is_weighted_model):
         super(bpr_loss, self).__init__()
-
-        if popularity is not None:
-            # FIXME: make sure that keys are aligned with positions
-            # self.popularity = torch.tensor(list(popularity.values())).to(device)
-            self.popularity = torch.tensor(popularity).to(device)
-            self.frequencies = torch.tensor(frequencies).to(device)
-            self.thresholds = thresholds
-        else:
-            self.popularity = None
-            self.thresholds = None
-
+        self.is_weighted_model = is_weighted_model
         self.logsigmoid = torch.nn.LogSigmoid()
 
-        self.scale = scale
-        self.beta = beta
-
-    def weight(self, pos_items, mask, one_as_default=True):
+    def forward(self, output_scores, mask):
         weight = mask
-        return weight
+        if self.is_weighted_model:
+            mask = mask > 0
 
-    def forward(self, x, y, **args):
-        n_llk = self.log_p(x, y, **args)
-        return n_llk
+        loss_value = - (self.logsigmoid(output_scores) * weight) / mask.sum()
+        return loss_value
+
+
 
 
 class bpr_rank_pair_loss(bpr_loss):
@@ -63,9 +52,9 @@ class bpr_rank_pair_loss(bpr_loss):
             filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
 
         if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
-            neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
+            neg_ll = - (self.logsigmoid(y1 - y2) * weight) / mask.sum()
         else:
-            neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
+            neg_ll = - (filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
             del pop_pos
             del filter_pos
 
@@ -165,7 +154,7 @@ class rvae_rank_pair_loss(rvae_loss):
             pop_pos = self.popularity[pos_items.long()]
             filter_pos = (pop_pos <= self.thresholds[0]).float().to(self.device)  # low
 
-        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
+        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING, model_types.U_SAMPLING):
             # assert mask.sum() > 0
             neg_ll = - (self.logsigmoid(y1 - y2) * weight) / mask.sum()
         else:

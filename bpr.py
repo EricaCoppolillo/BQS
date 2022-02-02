@@ -1,24 +1,28 @@
 import collections
 import os
+import sys
 from datetime import datetime
 import matplotlib.pyplot as plt
 import time
 import torch
 import numpy as np
 import json
+
+import tqdm
+
 from evaluation import MetricAccumulator
 from util import compute_max_y_aux_popularity, naive_sparse2tensor, set_seed
 from models import BPR
-from loss_func import bpr_rank_pair_loss
-import data_loaders
-import stream_data_loaders
+from loss_func import bpr_loss
+from data_loaders import BprDataLoader, CachedBprDataLoader, BprJannachDataLoader, BprBorattoNegativeSamplingDataLoader
 from config import Config
 
 datasets = Config("./datasets_info.json")
 model_types = Config("./model_type_info.json")
 
 # SETTINGS ------------------------------------------
-config = Config("./bpr_config.json")
+path_to_config = sys.argv[1]  # "./bpr_config.json"
+config = Config(path_to_config)
 
 if 'CUDA_VISIBLE_DEVICES' not in os.environ:
     os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
@@ -29,15 +33,15 @@ copy_pasting_data = eval(config.copy_pasting_data)
 config.cached_dataloader = eval(config.cached_dataloader if 'cached_dataloader' in config else 'False')
 config.metrics_scale = eval(config.metrics_scale)
 config.latent_dim = eval(config.latent_dim)
-
 config.alpha = eval(config.alpha)
 config.gamma = eval(config.gamma)
+reg_weight = float(config.reg_weight)
+pc_weight = float(config.pc_weight)
 if config.gamma:
     config.gamma = float(config.gamma)
 if config.alpha:
     config.alpha = float(config.alpha)
 WIDTH_PARAM = float(config.jannach_width)
-BETA_SAMPLING = float(config.beta_sampling)
 if model_type == "reweighting":
     assert (not config.alpha or not config.gamma) or (config.alpha > 0 and config.gamma > 0), config.alpha
 # ---------------------------------------------------
@@ -67,7 +71,7 @@ if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
 run_time = datetime.today().strftime('%Y%m%d_%H%M')
-run_dir = os.path.join(result_dir, f'{model_type}_{run_time}')
+run_dir = os.path.join(result_dir, f'{model_type}{config.data_loader_type}_{run_time}')
 
 os.makedirs(run_dir, exist_ok=True)
 
@@ -77,128 +81,87 @@ file_model = os.path.join(run_dir, 'best_model.pth')
 to_pickle = True
 
 """ Train and test"""
-
 if not config.cached_dataloader:
     if model_type == model_types.BASELINE:
-        if config.data_loader_type == "inverse_ppr":
-            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                                             decreasing_factor=1,
-                                                                                             model_type=model_type)
-        elif config.data_loader_type == "ppr":
-            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                                      decreasing_factor=1,
-                                                                                      model_type=model_type)
+        if config.data_loader_type == "":
+            trainloader = BprDataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
         elif config.data_loader_type == "jannach":
-            trainloader = data_loaders.JannachDataLoader(file_tr=dataset_file, seed=SEED, decreasing_factor=1,
-                                                         model_type=model_type,
-                                                         width_param=WIDTH_PARAM)
+            trainloader = BprJannachDataLoader(file_tr=dataset_file, seed=SEED,
+                                               decreasing_factor=config.decreasing_factor,
+                                               model_type=model_type, alpha=config.alpha, gamma=config.gamma,
+                                               width_param=WIDTH_PARAM)
         elif config.data_loader_type == "boratto":
-            trainloader = data_loaders.BorattoNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                         decreasing_factor=1,
-                                                                         model_type=model_type)
-        elif config.data_loader_type == "negative":
-            trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED, decreasing_factor=1,
-                                                                  model_type=model_type)
-        elif config.data_loader_type == "word2vec":
-            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
-                                                                          decreasing_factor=1,
-                                                                          model_type=model_type,
-                                                                          beta_sampling=BETA_SAMPLING)
-        elif config.data_loader_type == "stream":
-            trainloader = stream_data_loaders.StreamDataLoader(dataset_file, seed=SEED, decreasing_factor=1,
+            trainloader = BprBorattoNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
+                                                               decreasing_factor=1,
                                                                model_type=model_type)
-        elif config.data_loader_type == "2stages":
-            trainloader = stream_data_loaders.TwoStagesNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
-                                                                                  decreasing_factor=1,
-                                                                                  model_type=model_type,
-                                                                                  beta_sampling=BETA_SAMPLING,
-                                                                                  model=None,
-                                                                                  device=device,
-                                                                                  d=config.latent_dim,
-                                                                                  model_class="bpr")
-        else:
-            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
     else:
-        if config.data_loader_type == "inverse_ppr":
-            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
-                                                                                             seed=SEED,
-                                                                                             decreasing_factor=config.decreasing_factor,
-                                                                                             model_type=model_type,
-                                                                                             alpha=config.alpha,
-                                                                                             gamma=config.gamma)
-        elif config.data_loader_type == "ppr":
-            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
-                                                                                      seed=SEED,
-                                                                                      decreasing_factor=config.decreasing_factor,
-                                                                                      model_type=model_type,
-                                                                                      alpha=config.alpha,
-                                                                                      gamma=config.gamma)
-        elif config.data_loader_type == "jannach":
-            trainloader = data_loaders.JannachDataLoader(dataset_file, seed=SEED,
-                                                         decreasing_factor=config.decreasing_factor,
-                                                         model_type=model_type, alpha=config.alpha, gamma=config.gamma,
-                                                         width_param=WIDTH_PARAM)
-        elif config.data_loader_type == "boratto":
-            trainloader = data_loaders.BorattoNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                         decreasing_factor=config.decreasing_factor,
-                                                                         model_type=model_type, alpha=config.alpha,
-                                                                         gamma=config.gamma)
-        elif config.data_loader_type == "negative":
-            trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                  decreasing_factor=config.decreasing_factor,
-                                                                  model_type=model_type, alpha=config.alpha,
-                                                                  gamma=config.gamma)
-        elif config.data_loader_type == "word2vec":
-            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                          decreasing_factor=config.decreasing_factor,
-                                                                          model_type=model_type, alpha=config.alpha,
-                                                                          gamma=config.gamma,
-                                                                          beta_sampling=BETA_SAMPLING)
-        elif config.data_loader_type == "stream":
-            trainloader = stream_data_loaders.StreamDataLoader(dataset_file, seed=SEED,
-                                                               decreasing_factor=config.decreasing_factor,
-                                                               model_type=model_type, alpha=config.alpha,
-                                                               gamma=config.gamma)
-        elif config.data_loader_type == "2stages":
-            trainloader = stream_data_loaders.TwoStagesNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
-                                                                                  decreasing_factor=config.decreasing_factor,
-                                                                                  model_type=model_type,
-                                                                                  alpha=config.alpha,
-                                                                                  gamma=config.gamma,
-                                                                                  beta_sampling=BETA_SAMPLING,
-                                                                                  model=None,
-                                                                                  device=device,
-                                                                                  d=config.latent_dim,
-                                                                                  model_class="bpr")
-        else:
-            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma)
+        trainloader = BprDataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                    model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 else:
     print('USE CACHED DATALOADER')
     if model_type == model_types.BASELINE:
-        trainloader = data_loaders.CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
+        trainloader = CachedBprDataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
     else:
-        trainloader = data_loaders.CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                                    model_type=model_type, alpha=config.alpha, gamma=config.gamma)
+        trainloader = CachedBprDataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                          model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 
 n_items = trainloader.n_items
-all_item_idxs = torch.LongTensor(range(n_items))
-all_item_idxs = all_item_idxs.to(device)
 n_users = trainloader.n_users
 popularity = trainloader.item_popularity_dict["training"]
 thresholds = trainloader.thresholds
+abs_thresholds = trainloader.absolute_thresholds
+abs_frequencies = trainloader.absolute_item_popularity_dict['training']
 frequencies = trainloader.frequencies_dict["training"]
 
-max_y_aux_popularity = compute_max_y_aux_popularity(config)
+print(f"\nRegularizer: {config.regularizer}")
+
+if config.regularizer == "JS":
+    def _determine_class_pop(freq, th):
+        if freq <= th[0]:
+            return 0
+        elif freq > th[1]:
+            return 2
+        else:
+            return 1
+
+
+    pop_mapping = torch.zeros(size=(n_items, 3))
+    pop_mapping = pop_mapping.to(device)
+    for i in range(len(abs_frequencies)):
+        pop_mapping[i, _determine_class_pop(abs_frequencies[i], abs_thresholds)] = 1
+    pop_mapping.requires_grad = False
+elif config.regularizer == "boratto":
+    if CUDA:
+        torch_pop = torch.tensor(popularity).float().cuda()
+    else:
+        torch_pop = torch.tensor(popularity).float()
+    torch_pop.requires_grad = False
+elif config.regularizer == "PD":
+    elu_func = torch.nn.ELU()
+    if CUDA:
+        torch_pop = torch.tensor([elem ** float(config.reg_weight) for elem in popularity]).float().cuda()
+    else:
+        torch_pop = torch.tensor([elem ** float(config.reg_weight) for elem in popularity]).float()
+    torch_pop.requires_grad = False
+elif config.regularizer == "PC":
+    if CUDA:
+        torch_pop = torch.tensor(popularity).float().cuda()
+        torch_abs_pop = torch.tensor(abs_frequencies).float().cuda()
+        torch_n_items = torch.tensor([n_items] * config.batch_size).float().cuda()
+    else:
+        torch_pop = torch.tensor(popularity).float()
+        torch_abs_pop = torch.tensor(abs_frequencies).float()
+        torch_n_items = torch.tensor([n_items] * config.batch_size).float()
+    torch_pop.requires_grad = False
+    torch_abs_pop.requires_grad = False
+    torch_n_items.requires_grad = False
 
 
 def train(dataloader, epoch, optimizer):
-    if config.data_loader_type in {"stream", "2stages"}:
-        dataloader._init_batches()
-
     global update_count
+    global js_reg
 
-    log_interval = int(trainloader.n_users * .7 / config.batch_size // 4)
+    log_interval = int(dataloader.get_size() / config.batch_size // 4)
     if log_interval == 0:
         log_interval = 1
 
@@ -212,22 +175,34 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
-    for batch_idx, (x, pos, neg, mask, user_idxs) in enumerate(
-            dataloader.iter(batch_size=config.batch_size, model_type="bpr")):
-        x = naive_sparse2tensor(x).to(device)
-        pos_items = naive_sparse2tensor(pos).to(device)
-        neg_items = naive_sparse2tensor(neg).to(device)
-        mask = naive_sparse2tensor(mask).to(device)
-        user_idxs = torch.LongTensor(user_idxs.toarray() if hasattr(user_idxs, 'toarray') else user_idxs)
-        user_idxs = user_idxs.to(device)
+    for batch_idx, (triplets, mask) in enumerate(dataloader.iter(batch_size=config.batch_size)):
+        users = torch.tensor(triplets[:, 0], device=device)
+        pos = torch.tensor(triplets[:, 1], device=device)
+        neg = torch.tensor(triplets[:, 2], device=device)
+        mask = torch.tensor(mask, device=device)
         update_count += 1
 
         # TRAIN on batch
         optimizer.zero_grad()
-        y = model(user_idxs, all_item_idxs)
+        y = model(users, pos, neg)
 
-        loss = criterion(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask,
-                         model_type=model_type)
+        if config.regularizer == "PD":
+            y = elu_func(y) + 1
+            y = torch.einsum('b,b -> b', y, torch_pop[pos])
+
+        loss = criterion(y, mask)
+
+        if config.regularizer == "boratto":
+            # computing the absolute correlation
+            vx = loss - torch.mean(loss)
+            vy = torch_pop[pos.long()] - torch.mean(torch_pop[pos.long()])
+            correlation = torch.abs(
+                torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2))))
+            loss = torch.sum(loss)
+            loss += correlation * reg_weight
+        else:
+            loss = torch.sum(loss)
+
         loss.backward()
         optimizer.step()
 
@@ -255,7 +230,7 @@ def train(dataloader, epoch, optimizer):
 top_k = (1, 5, 10)
 
 
-def evaluate(dataloader, normalized_popularity, tag='validation'):
+def evaluate(dataloader, tag='validation'):
     # print("STARTING TO EVAL")
     # Turn on evaluation mode
     model.eval()
@@ -263,41 +238,77 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
     result = collections.defaultdict(float)
     batch_num = 0
     n_users_train = 0
-    # n_positives_predicted = np.zeros(3)
+    train_loss_cumulative = 0
     result['train_loss'] = 0
-    result['loss'] = 0
+
+    # compute loss
+
+    if model_type != model_types.LOW:
+        for triplets, mask in tqdm.tqdm(dataloader.iter(batch_size=config.batch_size, tag=tag),
+                                        desc=f'Compute {tag} loss'):
+            users = torch.tensor(triplets[:, 0], device=device)
+            pos = torch.tensor(triplets[:, 1], device=device)
+            neg = torch.tensor(triplets[:, 2], device=device)
+            mask = torch.tensor(mask, device=device)
+
+            y = model(users, pos, neg)
+
+            if config.regularizer == "PD":
+                y = elu_func(y) + 1
+
+            loss = criterion(y, mask)
+
+            if config.regularizer == "boratto":
+                # computing the absolute correlation
+                vx = loss - torch.mean(loss)
+                vy = torch_pop[pos.long()] - torch.mean(torch_pop[pos.long()])
+                correlation = torch.abs(
+                    torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2))))
+                loss = torch.sum(loss)
+                loss += correlation * reg_weight
+            else:
+                loss = torch.sum(loss)
+
+            train_loss_cumulative += loss.item()
+            batch_num += 1
+
+        if CUDA:
+            torch.cuda.empty_cache()
+
+        result['loss'] = train_loss_cumulative / batch_num if batch_num > 0 else 0
+    else:
+        result['loss'] = 0.
+
+    bs = 256
+    if n_items > 20000:
+        bs = 16
+
+    # evaluate
+    all_items = torch.arange(0, n_items, device=device, dtype=torch.long)
+    all_items = all_items.repeat(bs, 1)
 
     with torch.no_grad():
-        for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, user_idxs) in enumerate(
-                dataloader.iter_test(batch_size=config.batch_size, tag=tag, model_type="bpr")):
+        for batch_idx, (user_id, positives, negatives) in enumerate(dataloader.iter_test(batch_size=bs, tag=tag)):
             # print(f"[EVAL]: Entering batch {batch_idx}")
-            x_tensor = naive_sparse2tensor(x).to(device)
-            pos = naive_sparse2tensor(pos).to(device)
-            neg = naive_sparse2tensor(neg).to(device)
-            mask = naive_sparse2tensor(mask).to(device)
-            mask_te = naive_sparse2tensor(mask_te).to(device)
-            user_idxs = torch.LongTensor(user_idxs.toarray() if hasattr(user_idxs, 'toarray') else user_idxs)
-            user_idxs = user_idxs.to(device)
-            user_idxs += dataloader.discount_idxs[tag]
+            user = torch.tensor(user_id, device=device)
+            # pos = torch.tensor(positives, device=device)
+            # neg = torch.tensor(negatives, device=device)
 
             # print("[EVAL]: batch data have been processed")
-            batch_num += 1
-            n_users_train += x_tensor.shape[0]
+            # all_items = torch.cat([pos, neg], -1)
+            if user.shape[0] != all_items.shape[0]:
+                all_items = all_items[0:user.shape[0]]
+            score = model.score(user, all_items)
 
-            x_input = x_tensor * (1 - mask_te)
-            y = model(user_idxs, all_item_idxs)
+            n_users_train += 1
 
-            loss = criterion(x_input, y, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
-            # print("[EVAL]: Loss computed")
-            result['loss'] += loss.item()
-
-            recon_batch_cpu = y.cpu().numpy()
+            recon_batch_cpu = score.cpu().numpy()
 
             for k in top_k:
                 # print(f"[EVAL]: Computing metric for k={k}")
-                accumulator.compute_metric(x_input.cpu().numpy(),
+                accumulator.compute_metric(None,
                                            recon_batch_cpu,
-                                           pos_te, neg_te,
+                                           positives, negatives,
                                            popularity,
                                            dataloader.thresholds,
                                            k)
@@ -318,14 +329,8 @@ update_count = 0
 model = BPR(n_users=n_users, n_items=n_items, n_factors=config.latent_dim)
 model = model.to(device)
 
-if config.data_loader_type in {"stream", "2stages"}:
-    trainloader.model = model
+criterion = bpr_loss(is_weighted_model=model_type == model_types.REWEIGHTING)
 
-criterion = bpr_rank_pair_loss(device=device, popularity=popularity if model_type in (model_types.LOW, model_types.MED,
-                                                                                      model_types.HIGH) else None,
-                               scale=config.scale,
-                               thresholds=thresholds,
-                               frequencies=frequencies)
 best_loss = np.Inf
 
 stat_metric = []
@@ -346,7 +351,7 @@ try:
     for epoch in range(1, n_epochs + 1):
         epoch_start_time = time.time()
         train_loss = train(trainloader, epoch, optimizer)
-        result = evaluate(trainloader, popularity)
+        result = evaluate(trainloader)
 
         result['train_loss'] = train_loss
         stat_metric.append(result)
@@ -371,7 +376,8 @@ try:
             best_loss = result['loss']
         '''
         LOW, MED, HIGH = 0, 1, 2
-        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
+        if dataset_name != "ml-1m" and model_type in (
+                model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING):
             val_result = result["loss"]
         # in the following elif blocks, the value is multiplied by -1 to invert the objective (minimizing instead of
         # maximizing)
@@ -381,6 +387,9 @@ try:
             val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[MED])
         elif model_type == model_types.HIGH:
             val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[HIGH])
+        else:
+            val_result = -float(result[f"hitrate@{config.best_model_k_metric}"])
+
         if val_result < best_loss:
             torch.save(model.state_dict(), file_model)
             best_loss = val_result
@@ -389,10 +398,6 @@ except KeyboardInterrupt:
     print('-' * 89)
     print('Exiting from training early')
 
-# output.show()
-
-model = BPR(n_users=n_users, n_items=n_items, n_factors=config.latent_dim)
-model = model.to(device)
 model.load_state_dict(torch.load(file_model, map_location=device))
 model.eval()
 
@@ -455,11 +460,8 @@ plt.show();
 """# Test stats"""
 
 model.eval()
-
-if config.data_loader_type in {"stream", "2stages"}:
-    trainloader._init_batches()
-
-result_test = evaluate(trainloader, popularity, 'test')
+result_test = evaluate(trainloader, 'test')
+result_validation = evaluate(trainloader, 'validation')
 
 print(f'K = {config.gamma_k}')
 print("Test Statistics: \n")
@@ -495,6 +497,11 @@ def renaming_results(result_dict, rename_dict):
 
 with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
     json.dump(list(map(lambda x: renaming_results(x, renaming_luciano_stat), stat_metric)), fp)
+
+# validation results
+with open(os.path.join(run_dir, 'result_val.json'), 'w') as fp:
+    json.dump(renaming_results(result_validation, renaming_luciano_stat), fp,
+              indent=4, sort_keys=True)
 
 # test results
 with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:

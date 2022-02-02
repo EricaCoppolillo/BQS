@@ -10,8 +10,8 @@ datasets = [elem for elem in os.listdir(data_dir) if not elem.startswith(".")]
 
 for IDX in range(len(datasets)):
 
-    # if datasets[IDX] != "LFR_benchmark":
-    #     continue
+    if datasets[IDX] != "amzn-ggf":
+        continue
 
     if not os.path.exists(os.path.join(data_dir, datasets[IDX], "data_rvae.pickle")):
         print(f"Skipping: {datasets[IDX]}")
