@@ -1,54 +1,64 @@
 import collections
-import json
 import os
-import pickle
-import random
-import types
 from datetime import datetime
-import numpy as np
 import matplotlib.pyplot as plt
 import time
-import torch.nn as nn
 import torch
+import numpy as np
+import json
 from evaluation import MetricAccumulator
+from util import naive_sparse2tensor, set_seed, normalize_distr, js_div_2d
+from models import MultiVAE
+from loss_func import rvae_rank_pair_loss
+import data_loaders
+import stream_data_loaders
+from config import Config
 
-# DATASETS ----------------------------------------
-CITEULIKE = 'citeulike-a'
-EPINIONS = 'epinions'
-MOVIELENS_1M = 'ml-1m'
-MOVIELENS_20M = 'ml-20m'
-NETFLIX = 'netflix'
-NETFLIX_SAMPLE = 'netflix_sample'
-PINTEREST = 'pinterest'
-# ---------------------------------------------------
-
+datasets = Config("./datasets_info.json")
+model_types = Config("./model_type_info.json")
 
 # SETTINGS ------------------------------------------
-BASELINE = True  # Baseline/LowPop model
-dataset_name = CITEULIKE
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+config = Config("./rvae_config.json")
+
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = config.CUDA_VISIBLE_DEVICES
+
+dataset_name = eval(config.dataset_name)
+model_type = eval(config.model_type)
+copy_pasting_data = eval(config.copy_pasting_data)
+config.cached_dataloader = eval(config.cached_dataloader if 'cached_dataloader' in config else 'False')
+config.metrics_scale = eval(config.metrics_scale)
+config.use_popularity = eval(config.use_popularity)
+config.p_dims = eval(config.p_dims)
+config.alpha = eval(config.alpha)
+config.gamma = eval(config.gamma)
+reg_weight = float(config.reg_weight)
+pc_weight = float(config.pc_weight)
+if config.gamma:
+    config.gamma = float(config.gamma)
+if config.alpha:
+    config.alpha = float(config.alpha)
+WIDTH_PARAM = float(config.jannach_width)
+BETA_SAMPLING = float(config.beta_sampling)
+if model_type == "reweighting":
+    assert (not config.alpha or not config.gamma) or (config.alpha > 0 and config.gamma > 0), config.alpha
+
 # ---------------------------------------------------
 
-SEED = 8734
-
-np.random.seed(SEED)
-random.seed(SEED)
-torch.manual_seed(SEED)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
+# set seed for experiment reproducibility
+SEED = config.seed
+set_seed(SEED)
 
 USE_CUDA = True
 CUDA = USE_CUDA and torch.cuda.is_available()
-
 device = torch.device("cuda" if CUDA else "cpu")
 
-print(torch.__version__)
+print(f"Current PyTorch version: {torch.__version__}")
 
 if CUDA:
     print('run on cuda %s' % os.environ['CUDA_VISIBLE_DEVICES'])
 else:
     print('cuda not available')
-
 data_dir = os.path.expanduser('./data')
 
 data_dir = os.path.join(data_dir, dataset_name)
@@ -59,672 +69,177 @@ if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
 run_time = datetime.today().strftime('%Y%m%d_%H%M')
-if BASELINE:
-    type_str='baseline'
-else:
-    type_str='popularity_low'
-run_dir = os.path.join(result_dir, f'{type_str}_{run_time}')
+run_dir = os.path.join(result_dir, f'{model_type}{config.data_loader_type}_{run_time}')
 
-os.mkdir(run_dir)
+os.makedirs(run_dir, exist_ok=True)
 
 # TODO: include learning params
 file_model = os.path.join(run_dir, 'best_model.pth')
 
 to_pickle = True
 
+""" Train and test"""
 
-def load_dataset(fname, to_pickle=True):
-    if to_pickle:
-        with open(fname + '.pickle', 'rb') as fp:
-            return pickle.load(fp)
+if not config.cached_dataloader:
+    print(f"Model: {model_type}\nData Loader: {config.data_loader_type}")
+    if model_type == model_types.BASELINE:
+        if config.data_loader_type == "inverse_ppr":
+            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                                             decreasing_factor=1,
+                                                                                             model_type=model_type)
+        elif config.data_loader_type == "ppr":
+            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                                      decreasing_factor=1,
+                                                                                      model_type=model_type)
+        elif config.data_loader_type == "jannach":
+            trainloader = data_loaders.JannachDataLoader(file_tr=dataset_file, seed=SEED, decreasing_factor=1,
+                                                         model_type=model_type,
+                                                         width_param=WIDTH_PARAM)
+        elif config.data_loader_type == "boratto":
+            trainloader = data_loaders.BorattoNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
+                                                                         decreasing_factor=1,
+                                                                         model_type=model_type)
+        elif config.data_loader_type == "negative":
+            trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED, decreasing_factor=1,
+                                                                  model_type=model_type)
+        elif config.data_loader_type == "word2vec":
+            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
+                                                                          decreasing_factor=1,
+                                                                          model_type=model_type,
+                                                                          beta_sampling=BETA_SAMPLING)
+        elif config.data_loader_type == "stream":
+            trainloader = stream_data_loaders.StreamDataLoader(dataset_file, seed=SEED, decreasing_factor=1,
+                                                               model_type=model_type)
+        elif config.data_loader_type == "2stages":
+            trainloader = stream_data_loaders.TwoStagesNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
+                                                                                  decreasing_factor=1,
+                                                                                  model_type=model_type,
+                                                                                  beta_sampling=BETA_SAMPLING,
+                                                                                  device=device,
+                                                                                  model=None, model_class="rvae")
+        else:
+            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
     else:
-        with open(fname + '.json') as fp:
-            return json.load(fp)
-
-
-class DataLoader:
-    def __init__(self, file_tr, pos_neg_ratio=4, negatives_in_test=100, use_popularity=False):
-
-        dataset = load_dataset(file_tr)
-
-        self.n_users = dataset['users']
-        self.item_popularity = dataset['popularity']
-        self.thresholds = dataset['thresholds']
-        self.pos_neg_ratio = pos_neg_ratio
-        self.negatives_in_test = negatives_in_test
-
-        # IMPROVEMENT
-        self.low_pop = len([i for i in self.item_popularity if i <= self.thresholds[0]])
-        self.med_pop = len([i for i in self.item_popularity if self.thresholds[0] < i <= self.thresholds[1]])
-        self.high_pop = len([i for i in self.item_popularity if self.thresholds[1] < i])
-
-        # limit = self.high_pop
-        limit = 1
-
-        self.n_items = len(self.item_popularity)
-        self.use_popularity = use_popularity
-        self.sorted_item_popularity = sorted(self.item_popularity)
-        self.max_popularity = self.sorted_item_popularity[-limit]
-        self.min_popularity = self.sorted_item_popularity[0]
-
-        gamma = self.pos_neg_ratio
-        # gamma = 1
-        self.frequencies = [int(round((self.max_popularity * (gamma / min(p, self.max_popularity))))) for p in
-                            self.item_popularity]
-
-        self.max_width = -1
-
-        print('DATASET STATS ------------------------------')
-        print('users:', self.n_users)
-        print('items:', self.n_items)
-        print('low_pop:', self.low_pop)
-        print('med_pop:', self.med_pop)
-        print('high_pop:', self.high_pop)
-        print('thresholds:', self.thresholds)
-        print('max_popularity:', self.max_popularity)
-        print('min_popularity:', self.min_popularity)
-        print('max_frequency:', max(self.frequencies))
-        print('min_frequency:', min(self.frequencies))
-        print('num(max_popularity):', sum(self.item_popularity == self.max_popularity))
-        print('num(min_popularity):', sum(self.item_popularity == self.min_popularity))
-        print('sorted(self.sorted_item_popularity)[:100]:', sorted(self.sorted_item_popularity[:10]))
-        print('sorted(self.sorted_item_popularity)[-100:]:', sorted(self.sorted_item_popularity[-10:]))
-        print('sorted(frequencies):', sorted(self.frequencies)[:10])
-
-        print('phase 1: Loading data...')
-        self._initialize()
-        self._load_data(dataset)
-
-        print('phase 2: Generating training masks...')
-
-        for tag in ('train', 'validation', 'test'):
-            self._generate_mask_tr(tag)
-            print('type(self.data[tag])', type(self.data[tag]))
-            print('SET {}, shape {}, positives {}'.format(tag.upper(), self.data[tag].shape, self.data[tag].sum()))
-
-        print('phase 3: generating test masks...')
-
-        for tag in ('validation', 'test'):
-            self._generate_mask_te(tag)
-
-        print('Done.')
-
-    def _generate_mask_tr(self, tag):
-        self.mask[tag] = np.zeros((self.size[tag], self.max_width))
-        pos_temp = np.zeros((self.size[tag], self.max_width))
-        neg_temp = np.zeros((self.size[tag], self.max_width))
-
-        for row in range(self.size[tag]):
-            self.mask[tag][row, :len(self.pos[tag][row])] = [1] * len(self.pos[tag][row])
-            pos_temp[row, :len(self.pos[tag][row])] = self.pos[tag][row]
-            neg_temp[row, :len(self.neg[tag][row])] = self.neg[tag][row]
-
-        self.pos[tag] = pos_temp
-        self.neg[tag] = neg_temp
-
-    def _generate_mask_te(self, tag):
-        self.mask_rank[tag] = np.zeros((self.size[tag], self.n_items), dtype=np.int8)
-
-        for row in np.arange(self.size[tag]):
-            pos = self.pos_rank[tag][row]
-            self.mask_rank[tag][row, pos] = 1
-
-    def _initialize(self):
-        self._count_positive = {'train': None, 'validation': None, 'test': None}
-        self._count_positive_user = {'train': None, 'validation': None, 'test': None}
-
-        self.data = dict()
-        self.pos = dict()  # history of the user
-        self.neg = dict()
-        self.mask = dict()
-        self.pos_rank = dict()  # items to predict
-        self.neg_rank = dict()
-        self.mask_rank = dict()
-        self.size = dict()
-
-        for tag in ('train', 'validation', 'test'):
-            self.pos[tag] = []
-            self.neg[tag] = []
-
-        for tag in ('validation', 'test'):
-            self.pos_rank[tag] = []
-            self.neg_rank[tag] = []
-
-    def _load_data(self, dataset):
-        train = []
-        validation = []
-        test = []
-
-        training_data = dataset['training_data']
-        validation_data = dataset['validation_data']
-        test_data = dataset['test_data']
-
-        print('LEN TEST:', len(test_data.keys()))
-
-        # print('LEN TEST:',test_data)
-        '''
-        for user_id in training_data:
-            pos, neg = training_data[user_id]
-            assert len(neg) >= 100, f'fail train neg for user {user_id}'
-
-            items_np = np.zeros(self.n_items, dtype=np.int8)
-            items_np[pos] = 1
-            train.append(items_np)
-
-            pos, neg = self._generate_training_pairs(pos)
-
-            # print('pos:',pos)
-            # print('neg:',neg)
-            self.pos['train'].append(pos)
-            self.neg['train'].append(neg)
-        '''
-
-        for user_id in training_data:
-            if user_id % 1000 == 0:
-                print("{}/{}".format(user_id, len(training_data)))
-
-            pos, neg = training_data[user_id]
-            assert len(neg) >= 100, f'fail train neg for user {user_id}'
-
-            items_np = np.zeros(self.n_items, dtype=np.int8)
-            items_np[pos] = 1
-
-            pos, neg = self._generate_pairs(pos)
-
-            train.append(items_np)
-            self.pos['train'].append(pos)
-            self.neg['train'].append(neg)
-
-        print('self.max_width:', self.max_width)
-
-        self.data['train'] = np.array(train, dtype=np.int8)
-        self.data['train'][:] = train[:]
-        self.size['train'] = len(train)
-
-        for user_id in validation_data:
-            if user_id % 1000 == 0:
-                print("{}/{}".format(user_id, len(validation_data)))
-            positives_tr, positives_te, negatives_sampled = validation_data[user_id]
-            if len(positives_te) == 0:
-                continue
-
-            assert len(negatives_sampled) >= 100, f'fail valid neg for user {user_id}'
-
-            items_np = np.zeros(self.n_items, dtype=np.int8)
-            items_np[positives_tr] = 1
-            items_np[positives_te] = 1
-
-            pos, neg = self._generate_pairs(positives_tr)
-
-            validation.append(items_np)
-
-            self.pos['validation'].append(pos)
-            self.neg['validation'].append(neg)
-
-            self.pos_rank['validation'].append(positives_te)
-            self.neg_rank['validation'].append(negatives_sampled)
-
-        if len(validation) > 0:
-            self.data['validation'] = np.array(validation, dtype=np.int8)
-            self.data['validation'][:] = validation[:]
-            self.size['validation'] = len(validation)
-
-        for user_id in test_data:
-            if user_id % 1000 == 0:
-                print("{}/{}".format(user_id, len(test_data)))
-            positives_tr, positives_te, negatives_sampled = test_data[user_id]
-            if len(positives_te) == 0:
-                continue
-
-            assert len(negatives_sampled) >= 100, f'fail test neg for user {user_id}'
-
-            items_np = np.zeros(self.n_items, dtype=np.int8)
-            items_np[positives_tr] = 1
-            items_np[positives_te] = 1
-
-            pos, neg = self._generate_pairs(positives_tr)
-
-            test.append(items_np)
-
-            self.pos['test'].append(pos)
-            self.neg['test'].append(neg)
-
-            self.pos_rank['test'].append(positives_te)
-            self.neg_rank['test'].append(negatives_sampled)
-
-        if len(test) > 0:
-            self.data['test'] = np.array(test, dtype=np.int8)
-            self.data['test'][:] = test[:]
-            self.size['test'] = len(test)
-
-    def _sample_negatives(self, pos, size):
-        all_items = set(range(len(self.item_popularity)))
-        all_negatives = list(all_items - set(pos))
-
-        return random.choices(all_negatives, k=size)
-
-    def _generate_pairs(self, pos):
-        # IMPROVEMENT
-        positives = []
-        for item in pos:
-            if self.use_popularity:
-                frequency = self.frequencies[item]
-            else:
-                frequency = self.pos_neg_ratio
-            positives[0:0] = [item] * frequency
-
-        negatives = self._sample_negatives(pos, len(positives))
-        self.max_width = max(self.max_width, len(negatives))
-
-        return positives, negatives
-
-    def iter(self, batch_size=256, tag='train'):
-        """
-        Iter on data
- 
-        :param batch_size: size of the batch
-        :return: batch_idx, x, pos, neg, mask_pos, mask_neg
-        """
-
-        assert (tag in ('train', 'validation', 'test'))
-
-        # idxlist = np.arange(self._N)
-        idxlist = np.arange(self.data[tag].shape[0])
-        np.random.shuffle(idxlist)
-
-        N = idxlist.shape[0]
-
-        idx = np.argsort(self.frequencies)
-
-        for start_idx in range(0, N, batch_size):
-            end_idx = min(start_idx + batch_size, N)
-
-            x = self.data[tag][idxlist[start_idx:end_idx]]
-
-            pos = self.pos[tag][idxlist[start_idx:end_idx]]
-            neg = self.neg[tag][idxlist[start_idx:end_idx]]
-            mask = self.mask[tag][idxlist[start_idx:end_idx]]
-
-            yield x, pos, neg, mask
-
-    def iter_test(self, batch_size=256, tag='test'):
-        """
-        Iter on data
- 
-        mask_loss
- 
-        :param batch_size: size of the batch
-        :return: batch_idx, x, pos, neg, mask_pos, mask_neg
-        """
-
-        assert (tag in ('validation', 'test'))
-
-        N = self.size[tag]
-        for start_idx in range(0, N, batch_size):
-            end_idx = min(start_idx + batch_size, N)
-
-            x = self.data[tag][start_idx:end_idx]
-
-            pos = self.pos[tag][start_idx:end_idx]
-            neg = self.neg[tag][start_idx:end_idx]
-
-            mask = self.mask[tag][start_idx:end_idx]
-
-            pos_te = self.pos_rank[tag][start_idx:end_idx]
-            neg_te = self.neg_rank[tag][start_idx:end_idx]
-
-            mask_pos_te = self.mask_rank[tag][start_idx:end_idx]
-
-            # print('>>> pos_te:',pos_te)
-            # print('>>> neg_te:', neg_te)
-            # print('>>> mask_pos_te:', mask_pos_te)
-
-            yield x, pos, neg, mask, pos_te, neg_te, mask_pos_te
-
-    def get_items_counts_by_cat(self, tag):
-        """
-        Return the number of positive items in test set
-        :return: #less, #middle, #most
-        """
-
-        assert (tag in ('validation', 'test'))
-
-        if self._count_positive[tag] is None:
-            self._count_positive[tag] = [0, 0, 0]
-
-            for pos in self.pos_rank[tag]:
-                for item in pos:
-                    if self.item_popularity[item] <= self.thresholds[0]:
-                        self._count_positive[tag][0] += 1
-                    elif self.thresholds[0] < self.item_popularity[item] <= self.thresholds[1]:
-                        self._count_positive[tag][1] += 1
-                    else:
-                        self._count_positive[tag][2] += 1
-
-        return self._count_positive[tag]
-
-    def get_users_counts_by_cat(self, tag):
-        """
-        Return the number of user in popularity category in test set
-        :return: #less, #middle, #most
-        """
-
-        assert (tag in ('validation', 'test'))
-
-        if self._count_positive_user[tag] is None:
-            self._count_positive_user[tag] = [0, 0, 0]
-
-            for pos in self.pos_rank[tag]:
-                match = [False, False, False]
-                for item in pos:
-                    if self.item_popularity[item] <= self.thresholds[0]:
-                        match[0] = True
-                    elif self.thresholds[0] < self.item_popularity[item] <= self.thresholds[1]:
-                        match[1] = True
-                    else:
-                        match[2] = True
-
-                    if match[0] and match[1] and match[2]:
-                        break
-
-                for i, v in enumerate(match):
-                    if v:
-                        self._count_positive_user[tag][i] += 1
-
-        return self._count_positive_user[tag]
-
-
-def compute_max_y_aux_popularity():
-    domain = np.linspace(0, 1, 1000)
-    codomain = [y_aux_popularity(x) for x in domain]
-    max_y_aux_popularity = max(codomain)
-    return max_y_aux_popularity
-
-
-def sigmoid(z):
-    return 1 / (1 + np.exp(-z))
-
-
-def y_aux_popularity(x):
-    f = 1 / (settings.metrics_beta * np.sqrt(2 * np.pi))
-    y = np.tanh(settings.metrics_alpha * x) + \
-        settings.metrics_scale * f * np.exp(
-        -1 / (2 * (settings.metrics_beta ** 2)) * (x - settings.metrics_percentile) ** 2)
-    return y
-
-
-def y_popularity(x):
-    y = y_aux_popularity(x) / max_y_aux_popularity
-    return y
-
-
-def y_position(x, cutoff):
-    y = sigmoid(-x * settings.metrics_gamma / cutoff) + 0.5
-    return y
-
-
-def y_custom(popularity, position, cutoff):
-    y = y_popularity(popularity) * y_position(position, cutoff)
-    return y
-
-
-class MultiVAE(nn.Module):
-    """
-    Container module for Multi-VAE.
-    Multi-VAE : Variational Autoencoder with Multinomial Likelihood
-    See Variational Autoencoders for Collaborative Filtering
-    https://arxiv.org/abs/1802.05814
-    """
-
-    def __init__(self, p_dims, q_dims=None, dropout=0.5):
-        super(MultiVAE, self).__init__()
-        self.p_dims = p_dims
-        if q_dims:
-            assert q_dims[0] == p_dims[-1], "In and Out dimensions must equal to each other"
-            assert q_dims[-1] == p_dims[0], "Latent dimension for p- and q- network mismatches."
-            self.q_dims = q_dims
+        if config.data_loader_type == "inverse_ppr":
+            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
+                                                                                             seed=SEED,
+                                                                                             decreasing_factor=config.decreasing_factor,
+                                                                                             model_type=model_type,
+                                                                                             alpha=config.alpha,
+                                                                                             gamma=config.gamma)
+        elif config.data_loader_type == "ppr":
+            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
+                                                                                      seed=SEED,
+                                                                                      decreasing_factor=config.decreasing_factor,
+                                                                                      model_type=model_type,
+                                                                                      alpha=config.alpha,
+                                                                                      gamma=config.gamma)
+        elif config.data_loader_type == "jannach":
+            trainloader = data_loaders.JannachDataLoader(dataset_file, seed=SEED,
+                                                         decreasing_factor=config.decreasing_factor,
+                                                         model_type=model_type, alpha=config.alpha, gamma=config.gamma,
+                                                         width_param=WIDTH_PARAM)
+        elif config.data_loader_type == "boratto":
+            trainloader = data_loaders.BorattoNegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                         decreasing_factor=config.decreasing_factor,
+                                                                         model_type=model_type, alpha=config.alpha,
+                                                                         gamma=config.gamma)
+        elif config.data_loader_type == "negative":
+            trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                  decreasing_factor=config.decreasing_factor,
+                                                                  model_type=model_type, alpha=config.alpha,
+                                                                  gamma=config.gamma)
+        elif config.data_loader_type == "word2vec":
+            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                          decreasing_factor=config.decreasing_factor,
+                                                                          model_type=model_type, alpha=config.alpha,
+                                                                          gamma=config.gamma,
+                                                                          beta_sampling=BETA_SAMPLING)
+        elif config.data_loader_type == "stream":
+            trainloader = stream_data_loaders.StreamDataLoader(dataset_file, seed=SEED,
+                                                               decreasing_factor=config.decreasing_factor,
+                                                               model_type=model_type, alpha=config.alpha,
+                                                               gamma=config.gamma)
+        elif config.data_loader_type == "2stages":
+            trainloader = stream_data_loaders.TwoStagesNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
+                                                                                  decreasing_factor=config.decreasing_factor,
+                                                                                  model_type=model_type,
+                                                                                  alpha=config.alpha,
+                                                                                  gamma=config.gamma,
+                                                                                  beta_sampling=BETA_SAMPLING,
+                                                                                  device=device,
+                                                                                  model=None, model_class="rvae")
         else:
-            self.q_dims = p_dims[::-1]
-
-        print('Encoder dimensions:', self.q_dims)
-        print('Decoder dimensions:', self.p_dims)
-
-        # Last dimension of q- network is for mean and variance
-        temp_q_dims = self.q_dims[:-1] + [self.q_dims[-1] * 2]
-        self.q_layers = nn.ModuleList([nn.Linear(d_in, d_out) for
-                                       d_in, d_out in zip(temp_q_dims[:-1], temp_q_dims[1:])])
-        self.p_layers = nn.ModuleList([nn.Linear(d_in, d_out) for
-                                       d_in, d_out in zip(self.p_dims[:-1], self.p_dims[1:])])
-
-        self.bn_enc = nn.ModuleList([nn.BatchNorm1d(d_out) for d_out in temp_q_dims[1:-1]])
-        self.bn_dec = nn.ModuleList([nn.BatchNorm1d(d_out) for d_out in self.p_dims[1:-1]])
-
-        self.drop = nn.Dropout(dropout)
-        self.init_weights()
-
-    def forward(self, input_data, predict=False):
-        mu, logvar = self.encode(input_data)
-        if predict:
-            return self.decode(mu), mu, logvar
-
-        z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
-
-    def encode(self, input_data):
-        # h = F.normalize(input_data)
-        # h = self.drop(h)
-        h = input_data
-
-        for i, layer in enumerate(self.q_layers):
-            h = layer(h)
-            if i != len(self.q_layers) - 1:
-                # h = self.bn_enc[i](h)
-                # h = torch.tanh(h)
-                h = torch.relu(h)
-            else:
-                mu = h[:, :self.q_dims[-1]]
-                logvar = h[:, self.q_dims[-1]:]
-        return mu, logvar
-
-    def reparameterize(self, mu, logvar):
-        # if self.training:
-        #    std = torch.exp(0.5 * logvar)
-        #    eps = torch.randn_like(std)
-        #    return eps.mul(std).add_(mu)
-        # else:
-        #    return mu
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return eps.mul(std).add_(mu)
-
-    def decode(self, z):
-        h = z
-        for i, layer in enumerate(self.p_layers):
-            h = layer(h)
-            if i != len(self.p_layers) - 1:
-                # h = torch.tanh(h)
-                # h = self.bn_dec[i](h)
-                h = torch.relu(h)
-        return h
-
-    def init_weights(self):
-        for layer in self.q_layers:
-            # Xavier Initialization for weights
-            size = layer.weight.size()
-            fan_out = size[0]
-            fan_in = size[1]
-            std = np.sqrt(2.0 / (fan_in + fan_out))
-            layer.weight.data.normal_(0.0, std)
-
-            # Normal Initialization for Biases
-            layer.bias.data.normal_(0.0, 0.001)
-
-        for layer in self.p_layers:
-            # Xavier Initialization for weights
-            size = layer.weight.size()
-            fan_out = size[0]
-            fan_in = size[1]
-            std = np.sqrt(2.0 / (fan_in + fan_out))
-            layer.weight.data.normal_(0.0, std)
-
-            # Normal Initialization for Biases
-            layer.bias.data.normal_(0.0, 0.001)
-
-
-class rvae_loss(nn.Module):
-    def __init__(self, popularity=None, scale=1., beta=1., thresholds=None, frequencies=None):
-        super(rvae_loss, self).__init__()
-
-        if popularity is not None:
-            # FIXME: make sure that keys are aligned with positions
-            # self.popularity = torch.tensor(list(popularity.values())).to(device)
-            self.popularity = torch.tensor(popularity).to(device)
-            self.frequencies = torch.tensor(frequencies).to(device)
-            self.thresholds = thresholds
-        else:
-            self.popularity = None
-            self.thresholds = None
-
-        self.logsigmoid = torch.nn.LogSigmoid()
-
-        self.scale = scale
-        self.beta = beta
-
-    def weight(self, pos_items, mask, one_as_default=True):
-        weight = mask
-        return weight
-
-    def kld(self, mu, logvar):
-        # see Appendix B from VAE paper:
-        # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-        # https://arxiv.org/abs/1312.6114
-        # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-        KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
-
-        return KLD
-
-    def forward(self, x, y, mu, logvar, anneal, **args):
-        n_llk = self.log_p(x, y, **args)
-
-        loss = n_llk + anneal * self.kld(mu, logvar)
-        # loss = n_llk + self.kld(mu, logvar)
-
-        return loss
-
-
-class rvae_rank_pair_loss(rvae_loss):
-    def __init__(self, **kargs):
-        super(rvae_rank_pair_loss, self).__init__(**kargs)
-
-    def log_p(self, x, y, pos_items, neg_items, mask):
-        weight = mask
-
-        y1 = torch.gather(y, 1, (pos_items).long()) * mask
-        y2 = torch.gather(y, 1, (neg_items).long()) * mask
-
-        pop_pos = self.popularity[pos_items.long()]
-        pop_neg = self.popularity[neg_items.long()]
-
-        filter_pos = (pop_pos <= self.thresholds[0]).float()  # low
-        filter_neg = (pop_neg > self.thresholds[0]).float()  # low
-
-        # freq_pos = self.frequencies[pos_items.long()].float()
-        # freq_neg = self.frequencies[neg_items.long()].float()
-
-        if BASELINE:
-            neg_ll = - torch.sum(self.logsigmoid(y1 - y2) * weight) / mask.sum()
-        else:
-            neg_ll = - torch.sum(filter_pos * self.logsigmoid(y1 - y2) * weight) / mask.sum()
-            # neg_ll = - torch.sum(self.logsigmoid((1 - pop_pos) * y1 - y2) * weight) / mask.sum()
-            # neg_ll = - torch.sum(filter_pos * filter_neg*self.logsigmoid(y1 - y2) * weight) / mask.sum()
-
-        del pop_pos
-        del pop_neg
-        del filter_pos
-        del filter_neg
-
-        torch.cuda.empty_cache()
-
-        return neg_ll
-
-
-class rvae_focal_loss(rvae_loss):
-    def __init__(self, gamma=3, **kargs):
-        super(rvae_focal_loss, self).__init__(**kargs)
-
-        self.gamma = gamma
-        self.sigmoid = torch.nn.Sigmoid()
-
-    def log_p(self, x, y, pos_items, neg_items, mask):
-        weight = self.weight(pos_items, mask)
-
-        # y1 = torch.gather(y, 1, (pos_items).long()) * mask
-        # y2 = torch.gather(y, 1, (neg_items).long()) * mask
-        # neg_ll = - torch.sum(self.logsigmoid(y1 - y2)*weight) / mask.sum()
-        # neg_ll = - torch.pow(1 - torch.exp(neg_ll), 5) * neg_ll
-
-        # log_p = torch.fun.sigmoid(weight*score)
-        y1 = torch.gather(y, 1, (pos_items).long())
-        y2 = torch.gather(y, 1, (neg_items).long())
-        p = self.sigmoid(y1 - y2) * mask
-        w = weight / self.scale * p
-        w = w * (1 - p).pow(self.gamma)
-
-        neg_ll = - w * self.logsigmoid(y1 - y2) * mask
-
-        # neg_ll = - torch.pow(1 - torch.exp(log_p), self.beta) * weight * log_p
-
-        neg_ll = torch.sum(neg_ll) / mask.sum()
-
-        return neg_ll
-
-
-"""# Train and test"""
-
-if BASELINE:
-    trainloader = DataLoader(dataset_file, use_popularity=False)
+            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 else:
-    trainloader = DataLoader(dataset_file, use_popularity=True)
+    print('USE CACHED DATALOADER')
+    if model_type == model_types.BASELINE:
+        trainloader = data_loaders.CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
+    else:
+        trainloader = data_loaders.CachedDataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
+                                                    model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 
 n_items = trainloader.n_items
-
-# SETTINGS
-settings = types.SimpleNamespace()
-settings.dataset_name = os.path.split(data_dir)[-1]
-# settings.p_dims = [200, 600, n_items]
-
-settings.batch_size = 1024
-settings.weight_decay = 0.0
-settings.learning_rate = 1e-3
-# the total number of gradient updates for annealing
-settings.total_anneal_steps = 200000
-# largest annealing parameter
-settings.anneal_cap = 0.2
-settings.sample_mask = 100
-
-settings.gamma_k = 1000
-
-settings.metrics_alpha = 100
-settings.metrics_beta = .03
-settings.metrics_gamma = 5
-settings.metrics_scale = 1 / 15
-settings.metrics_percentile = .45
-
-popularity = trainloader.item_popularity
+config.p_dims.append(n_items)
+popularity = trainloader.item_popularity_dict["training"]
 thresholds = trainloader.thresholds
-frequencies = trainloader.frequencies
+abs_thresholds = trainloader.absolute_thresholds
+abs_frequencies = trainloader.absolute_item_popularity_dict['training']
+frequencies = trainloader.frequencies_dict["training"]
 
-max_y_aux_popularity = compute_max_y_aux_popularity()
+print(f"\nRegularizer: {config.regularizer}")
+
+if config.regularizer == "JS":
+    def _determine_class_pop(freq, th):
+        if freq <= th[0]:
+            return 0
+        elif freq > th[1]:
+            return 2
+        else:
+            return 1
 
 
-def naive_sparse2tensor(data):
-    return torch.FloatTensor(data.toarray() if hasattr(data, 'toarray') else data)
+    pop_mapping = torch.zeros(size=(n_items, 3))
+    pop_mapping = pop_mapping.to(device)
+    for i in range(len(abs_frequencies)):
+        pop_mapping[i, _determine_class_pop(abs_frequencies[i], abs_thresholds)] = 1
+    pop_mapping.requires_grad = False
+elif config.regularizer == "boratto":
+    if CUDA:
+        torch_pop = torch.tensor(popularity).float().cuda()
+    else:
+        torch_pop = torch.tensor(popularity).float()
+    torch_pop.requires_grad = False
+elif config.regularizer == "PD":
+    elu_func = torch.nn.ELU()
+    if CUDA:
+        torch_pop = torch.tensor([elem ** float(config.reg_weight) for elem in popularity]).float().cuda()
+    else:
+        torch_pop = torch.tensor([elem ** float(config.reg_weight) for elem in popularity]).float()
+    torch_pop.requires_grad = False
+elif config.regularizer == "PC":
+    if CUDA:
+        torch_pop = torch.tensor(popularity).float().cuda()
+        torch_abs_pop = torch.tensor(abs_frequencies).float().cuda()
+        torch_n_items = torch.tensor([n_items] * config.batch_size).float().cuda()
+    else:
+        torch_pop = torch.tensor(popularity).float()
+        torch_abs_pop = torch.tensor(abs_frequencies).float()
+        torch_n_items = torch.tensor([n_items] * config.batch_size).float()
+    torch_pop.requires_grad = False
+    torch_abs_pop.requires_grad = False
+    torch_n_items.requires_grad = False
 
 
 def train(dataloader, epoch, optimizer):
-    global update_count
+    if config.data_loader_type in {"stream", "2stages"}:
+        dataloader._init_batches()
 
-    log_interval = int(trainloader.n_users * .7 / settings.batch_size // 4)
+    global update_count
+    global js_reg
+
+    log_interval = int(trainloader.n_users * .7 / config.batch_size // 4)
     if log_interval == 0:
         log_interval = 1
 
@@ -738,24 +253,60 @@ def train(dataloader, epoch, optimizer):
         print(f'log every {log_interval} log interval')
         # print(f'batches are {dataloader.n_items // settings.batch_size} with size {settings.batch_size}')
 
-    for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=settings.batch_size)):
+    for batch_idx, (x, pos, neg, mask) in enumerate(dataloader.iter(batch_size=config.batch_size)):
         x = naive_sparse2tensor(x).to(device)
         pos_items = naive_sparse2tensor(pos).to(device)
         neg_items = naive_sparse2tensor(neg).to(device)
         mask = naive_sparse2tensor(mask).to(device)
 
         update_count += 1
-        if settings.total_anneal_steps > 0:
-            anneal = min(settings.anneal_cap, 1. * update_count / settings.total_anneal_steps)
+        if config.total_anneal_steps > 0:
+            anneal = min(config.anneal_cap, 1. * update_count / config.total_anneal_steps)
         else:
-            anneal = settings.anneal_cap
+            anneal = config.anneal_cap
 
         # TRAIN on batch
         optimizer.zero_grad()
         y, mu, logvar = model(x)
 
-        # loss = criterion(recon_batch, x, pos_items, neg_items, mask, mask, mu, logvar, anneal)
-        loss = criterion(x, y, mu, logvar, anneal, pos_items=pos_items, neg_items=neg_items, mask=mask)
+        if config.regularizer == "PD":
+            y = elu_func(y) + 1
+            y = torch.einsum('bi,i -> bi', y, torch_pop)
+        elif config.regularizer == "PC":
+            denominator = torch_n_items[:x.shape[0]] - x.sum(dim=0)
+            n_u = torch.norm(torch.einsum('bi, b -> bi', (torch.einsum('bi, bi -> bi', y, 1 - x)), 1/denominator), \
+                             p='fro', dim=0)
+            c = torch.einsum('bi, i -> bi', (y*config.reg_weight + (1-reg_weight)), 1/torch_abs_pop)
+            m_u = torch.norm(torch.einsum('bi, b -> bi', torch.einsum('bi, bi->bi', c, 1-x), 1/denominator), \
+                             p='fro', dim=0)
+            y = torch.einsum('bi, bi -> bi', y, c*pc_weight*n_u/m_u)
+
+
+        loss = criterion.log_p(x, y, pos_items=pos_items, neg_items=neg_items, mask=mask, model_type=model_type)
+
+        if config.regularizer == "JS":
+            foldin_mask = (x == 1).float()
+            topk_scores, topk_items = torch.topk(torch.einsum('bi,bi -> bi', y, foldin_mask), 100)
+            topk_pop_distro = torch.einsum('bi, bic -> bc', topk_scores, pop_mapping[topk_items])
+            norm_topk_pop_distro = js_div_2d(topk_pop_distro)
+            foldin_pop = torch.einsum('bi,ic -> bc', x, pop_mapping)
+            foldin_pop = foldin_pop.float()
+            norm_foldin_pop = js_div_2d(foldin_pop)
+            loss += js_div_2d(norm_topk_pop_distro.unsqueeze(0).unsqueeze(0) + 1e-10,
+                              norm_foldin_pop.unsqueeze(0).unsqueeze(0) + 1e-10)[0, 0] * reg_weight
+        elif config.regularizer == "boratto":
+            # computing the absolute correlation
+            vx = loss - torch.mean(loss)
+            vy = torch_pop[pos_items.long()] - torch.mean(torch_pop[pos_items.long()])
+            correlation = torch.abs(
+                torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2))))
+            loss = torch.sum(loss)
+            loss += correlation * reg_weight
+        else:
+            loss = torch.sum(loss)
+
+        loss += anneal * criterion.kld(mu, logvar)
+
         loss.backward()
         optimizer.step()
 
@@ -767,7 +318,7 @@ def train(dataloader, epoch, optimizer):
         if batch_idx % log_interval == 0 and batch_idx > 0:
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:4d}/{:4d} batches | ms/batch {:4.2f} | loss {:4.4f}'.format(
-                epoch, batch_idx, len(range(0, dataloader.size['train'], settings.batch_size)),
+                epoch, batch_idx, len(range(0, dataloader.size['train'], config.batch_size)),
                 elapsed * 1000 / log_interval,
                 train_loss / log_interval))
 
@@ -783,40 +334,71 @@ def train(dataloader, epoch, optimizer):
 top_k = (1, 5, 10)
 
 
-def evaluate(dataloader, normalized_popularity, tag='validation'):
+def evaluate(dataloader, popularity, tag='validation'):
+    global js_reg
     # Turn on evaluation mode
     model.eval()
     accumulator = MetricAccumulator()
     result = collections.defaultdict(float)
     batch_num = 0
     n_users_train = 0
-    # n_positives_predicted = np.zeros(3)
     result['train_loss'] = 0
     result['loss'] = 0
 
     with torch.no_grad():
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te) in enumerate(
-                dataloader.iter_test(batch_size=settings.batch_size, tag=tag)):
+                dataloader.iter_test(batch_size=config.batch_size, tag=tag)):
+            # print(f"[EVAL]: Entering batch {batch_idx}")
             x_tensor = naive_sparse2tensor(x).to(device)
             pos = naive_sparse2tensor(pos).to(device)
             neg = naive_sparse2tensor(neg).to(device)
             mask = naive_sparse2tensor(mask).to(device)
             mask_te = naive_sparse2tensor(mask_te).to(device)
-
+            # print("[EVAL]: batch data have been processed")
             batch_num += 1
             n_users_train += x_tensor.shape[0]
 
             x_input = x_tensor * (1 - mask_te)
             y, mu, logvar = model(x_input, True)
 
-            #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
-            loss = criterion(x_input, y, mu, logvar, 0, pos_items=pos, neg_items=neg, mask=mask)
+            if config.regularizer == "PD":
+                y = elu_func(y) + 1
 
+            # print("[EVAL]: model forward done")
+            #            loss = criterion(recon_batch, x_input, pos, neg, mask, mask, mu, logvar)
+            loss = criterion.log_p(x_input, y, pos_items=pos, neg_items=neg, mask=mask, model_type=model_type)
+
+            if config.regularizer == "JS":
+                foldin_mask = (x_input == 1).float()
+                topk_scores, topk_items = torch.topk(torch.einsum('bi,bi -> bi', y, foldin_mask), 100)
+                topk_pop_distro = torch.einsum('bi, bic -> bc', topk_scores, pop_mapping[topk_items])
+                norm_topk_pop_distro = normalize_distr(topk_pop_distro)
+                foldout_pop = torch.einsum('bi,ic -> bc', mask_te, pop_mapping)
+                foldout_pop = foldout_pop.float()
+                norm_foldout_pop = normalize_distr(foldout_pop)
+                loss += js_div_2d(norm_topk_pop_distro.unsqueeze(0).unsqueeze(0) + 1e-10,
+                                  norm_foldout_pop.unsqueeze(0).unsqueeze(0) + 1e-10)[0, 0] * js_reg
+            elif config.regularizer == "boratto":
+                # computing the absolute correlation
+                vx = loss - torch.mean(loss)
+                vy = torch_pop[pos.long()] - torch.mean(torch_pop[pos.long()])
+                correlation = torch.abs(
+                    torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2))))
+                loss = torch.sum(loss)
+                loss += correlation * reg_weight
+            else:
+                loss = torch.sum(loss)
+
+            # loss += 0.*criterion.kld(mu, logvar) # no kld in evaluation
+            # print("[EVAL]: Loss computed")
+            if np.isinf(loss.item()):
+                print("Val Loss inf")
             result['loss'] += loss.item()
 
             recon_batch_cpu = y.cpu().numpy()
 
             for k in top_k:
+                # print(f"[EVAL]: Computing metric for k={k}")
                 accumulator.compute_metric(x_input.cpu().numpy(),
                                            recon_batch_cpu,
                                            pos_te, neg_te,
@@ -833,22 +415,22 @@ def evaluate(dataloader, normalized_popularity, tag='validation'):
 
 torch.set_printoptions(profile="full")
 
-n_epochs = 50
+n_epochs = config.n_epochs
 update_count = 0
-settings.optim = 'adam'
-settings.scale = 1000
-settings.use_popularity = True
-settings.p_dims = [200, 600, n_items]
 
-print(settings.p_dims)
-model = MultiVAE(settings.p_dims)
+# need to init the model prior to the dataloader to build the two-stages stream dataloader
+print(config.p_dims)
+model = MultiVAE(config.p_dims)
 model = model.to(device)
 
-criterion = rvae_rank_pair_loss(popularity=popularity if settings.use_popularity else None,
-                                scale=settings.scale,
+criterion = rvae_rank_pair_loss(device=device, popularity=popularity if model_type in (model_types.LOW, model_types.MED,
+                                                                                       model_types.HIGH) else None,
+                                scale=config.scale,
                                 thresholds=thresholds,
                                 frequencies=frequencies)
-# criterion = rvae_focal_loss(popularity=popularity if settings.use_popularity else None, scale=settings.scale)
+
+if config.data_loader_type in {"stream", "2stages"}:
+    trainloader.model = model
 
 best_loss = np.Inf
 
@@ -856,16 +438,16 @@ stat_metric = []
 
 print('At any point you can hit Ctrl + C to break out of training early.')
 try:
-    if settings.optim == 'adam':
+    if config.optim == 'adam':
         optimizer = torch.optim.Adam(model.parameters(),
-                                     lr=settings.learning_rate,
-                                     weight_decay=settings.weight_decay)
-    elif settings.optim == 'sgd':
-        optimizer = torch.optim.SGD(params=model.parameters(), lr=settings.learning_rate, momentum=0.9,
+                                     lr=config.learning_rate,
+                                     weight_decay=config.weight_decay)
+    elif config.optim == 'sgd':
+        optimizer = torch.optim.SGD(params=model.parameters(), lr=config.learning_rate, momentum=0.9,
                                     dampening=0, weight_decay=0, nesterov=True)
     else:
-        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=settings.learning_rate, alpha=0.99, eps=1e-08,
-                                        weight_decay=settings.weight_decay, momentum=0, centered=False)
+        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=config.learning_rate, alpha=0.99, eps=1e-08,
+                                        weight_decay=config.weight_decay, momentum=0, centered=False)
 
     for epoch in range(1, n_epochs + 1):
         epoch_start_time = time.time()
@@ -874,10 +456,13 @@ try:
 
         result['train_loss'] = train_loss
         stat_metric.append(result)
-
-        print_metric = lambda k, v: f'{k}: {v:.4f}' if not isinstance(v, str) else f'{k}: {v}'
+        renaming_luciano_stat = {"weighted_luciano_stat@5": "weighted_hit_rate@5",
+                                 "luciano_stat_by_pop@5": "hitrate_by_pop@5",
+                                 "train_loss": "train_loss", "loss": "loss"}
+        print_metric = lambda k, v: f'{renaming_luciano_stat[k]}: {v:.4f}' if not isinstance(v, str) \
+            else f'{renaming_luciano_stat[k]}: {v}'
         ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in
-                         ('train_loss', 'loss', 'hitrate@5', 'hitrate_by_pop@5', 'weighted_luciano_stat@5',
+                         ('train_loss', 'loss', 'weighted_luciano_stat@5',
                           'luciano_stat_by_pop@5')])
         ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
         ls = len(ss)
@@ -886,10 +471,27 @@ try:
         print('-' * ls)
 
         # Save the model if the n100 is the best we've seen so far.
+        '''
         if best_loss > result['loss']:
-            with open(file_model, 'wb') as f:
-                torch.save(model, f)
+            torch.save(model.state_dict(), file_model)
             best_loss = result['loss']
+        '''
+        LOW, MED, HIGH = 0, 1, 2
+        if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING, model_types.U_SAMPLING):
+            val_result = result["loss"]
+            if np.isinf(val_result) or np.isnan(val_result):
+                val_result = -float(result[f"luciano_stat@{config.best_model_k_metric}"])
+        # in the following elif blocks, the value is multiplied by -1 to invert the objective (minimizing instead of
+        # maximizing)
+        elif model_type == model_types.LOW:
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[LOW])
+        elif model_type == model_types.MED:
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[MED])
+        elif model_type == model_types.HIGH:
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[HIGH])
+        if val_result < best_loss:
+            torch.save(model.state_dict(), file_model)
+            best_loss = val_result
 
 except KeyboardInterrupt:
     print('-' * 89)
@@ -897,27 +499,36 @@ except KeyboardInterrupt:
 
 # output.show()
 
-with open(file_model, 'rb') as f:
-    model = torch.load(f)
+model = MultiVAE(config.p_dims)
+model = model.to(device)
+model.load_state_dict(torch.load(file_model, map_location=device))
+model.eval()
 
 """# Training stats"""
 
-# print(f'K = {settings.gamma_k}')
-print('\n'.join([f'{k:<23}{v}' for k, v in sorted(stat_metric[-1].items())]))
+renaming_luciano_stat = {"loss": "loss", "train_loss": "train_loss"}
+d1 = {f"luciano_recalled_by_pop@{k}": f"recall_by_pop@{k}" for k in [1, 5, 10]}
+d2 = {f"luciano_stat_by_pop@{k}": f"hit_rate_by_pop@{k}" for k in [1, 5, 10]}
+d3 = {f"luciano_stat@{k}": f"hit_rate@{k}" for k in [1, 5, 10]}
+d4 = {f"luciano_weighted_stat@{k}": f"weighted_hit_Rate@{k}" for k in [1, 5, 10]}
+renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4}
+
+print("Training Statistics: \n")
+print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(stat_metric[-1].items())
+                 if k in renaming_luciano_stat]))
 
 # LOSS
 lossTrain = [x['train_loss'] for x in stat_metric]
 lossTest = [x['loss'] for x in stat_metric]
-
-lastHitRate = [x['hitrate@5'] for x in stat_metric]
+lastHitRate = [x['luciano_stat@5'] for x in stat_metric]
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
 ax1.plot(lossTrain, color='b', )
-# ax1.set_yscale('log')
+ax1.set_yscale('log')
 ax1.set_title('Train')
 
 ax2.plot(lossTest, color='r')
-# ax2.set_yscale('log')
+ax2.set_yscale('log')
 ax2.set_title('Validation')
 
 ax3.plot(lastHitRate)
@@ -929,7 +540,7 @@ axes = axes.ravel()
 i = 0
 
 for k in top_k:
-    hitRate = [x[f'hitrate@{k}'] for x in stat_metric]
+    hitRate = [x[f'luciano_stat@{k}'] for x in stat_metric]
 
     ax = axes[i]
     i += 1
@@ -939,7 +550,7 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'luciano_stat_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
@@ -953,9 +564,12 @@ plt.show();
 
 model.eval()
 result_test = evaluate(trainloader, popularity, 'test')
+result_validation = evaluate(trainloader, popularity, 'validation')
 
-print(f'K = {settings.gamma_k}')
-print('\n'.join([f'{k:<23}{v}' for k, v in sorted(result_test.items())]))
+print(f'K = {config.gamma_k}')
+print("Test Statistics: \n")
+print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(result_test.items())
+                 if k in renaming_luciano_stat]))
 
 """# Save result"""
 
@@ -963,15 +577,27 @@ lossname = criterion.__class__.__name__
 
 # result info
 with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
-    fp.write(f'K = {settings.gamma_k}\n')
+    fp.write(f'K = {config.gamma_k}\n')
     fp.write(f'Loss = {lossname}\n')
-    fp.write(f'Epochs train = {len(stat_metric)}\n')
-
+    # fp.write(f'Epochs train = {len(stat_metric)}\n')
+    fp.write(f'Data_Loader_Type = {config.data_loader_type}\n')
+    fp.write(f"Regularizer = {config.regularizer}\n")
+    fp.write(f"Dataset = {dataset_name}\n")
+    fp.write(f"Seed = {SEED}\n")
     fp.write('\n')
 
-    for k in dir(settings):
-        if not k.startswith('__'):
-            fp.write(f'{k} = {getattr(settings, k)}\n')
+    for k in config.__dict__:
+        fp.write(f'{k} = {config.__dict__[k]}\n')
+
+    fp.write(f"Average_Exposure = {np.mean(trainloader.item_visibility_dict['training'])}\n")
+    fp.write(f"Std_Exposure = {np.std(trainloader.item_visibility_dict['training'])}\n")
+    if model_type == model_types.OVERSAMPLING:
+        fp.write(f"Multiplier for oversampling formula = {trainloader.h}\n")
+    try:
+        fp.write(f"Contamination = {trainloader.contamination}\n")
+    except:
+        pass
+
 
 #    fp.write('\n' * 4)
 #    model_print, _ = torchsummary.summary_string(model, (dataloader.n_items,), device='gpu' if CUDA else 'cpu')
@@ -979,18 +605,28 @@ with open(os.path.join(run_dir, 'info.txt'), 'w') as fp:
 
 
 # all results
+def renaming_results(result_dict, rename_dict):
+    return {rename_dict[k]: v for k, v in result_dict.items() if k in rename_dict}
+
+
 with open(os.path.join(run_dir, 'result.json'), 'w') as fp:
-    json.dump(stat_metric, fp)
+    json.dump(list(map(lambda x: renaming_results(x, renaming_luciano_stat), stat_metric)), fp)
+
+# validation results
+with open(os.path.join(run_dir, 'result_val.json'), 'w') as fp:
+    json.dump(renaming_results(result_validation, renaming_luciano_stat), fp,
+              indent=4, sort_keys=True)
 
 # test results
 with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
-    json.dump(result_test, fp, indent=4, sort_keys=True)
+    json.dump(renaming_results(result_test, renaming_luciano_stat), fp,
+              indent=4, sort_keys=True)
 
 # chart 1
 lossTrain = [x['train_loss'] for x in stat_metric]
 lossTest = [x['loss'] for x in stat_metric]
 
-lastHitRate = [x['hitrate@5'] for x in stat_metric]
+lastHitRate = [x['luciano_stat@5'] for x in stat_metric]
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
 ax1.plot(lossTrain, color='b', )
@@ -1005,6 +641,7 @@ ax3.plot(lastHitRate)
 ax3.set_title('HitRate@5')
 
 plt.savefig(os.path.join(run_dir, 'loss.png'));
+plt.savefig(os.path.join(run_dir, 'loss.pdf'));
 
 # chart 2
 fig, axes = plt.subplots(4, 3, figsize=(20, 20))
@@ -1013,7 +650,7 @@ axes = axes.ravel()
 i = 0
 
 for k in top_k:
-    hitRate = [x[f'hitrate@{k}'] for x in stat_metric]
+    hitRate = [x[f'luciano_stat@{k}'] for x in stat_metric]
 
     ax = axes[i]
     i += 1
@@ -1023,7 +660,7 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'hitrate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'luciano_stat_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
@@ -1032,5 +669,20 @@ for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
         ax.set_title(f'{name} hitrate_by_pop@{k}')
 
 plt.savefig(os.path.join(run_dir, 'hr.png'));
+plt.savefig(os.path.join(run_dir, 'hr.pdf'));
 
-print('DONE', run_dir)
+if copy_pasting_data:
+    main_directory = os.path.join('./data', dataset_name, model_type)
+    # deleting the main directory used by the ensemble script
+    import shutil
+
+    if os.path.isdir(main_directory):
+        shutil.rmtree(main_directory, ignore_errors=True)
+    # moving the run directory into the main
+    from distutils.dir_util import copy_tree
+
+    os.makedirs(main_directory)
+    copy_tree(run_dir, main_directory)
+
+print('DONE')
+print(run_dir)

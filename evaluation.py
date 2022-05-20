@@ -85,15 +85,15 @@ class MetricAccumulator:
 
                 computed_acc.luciano_weighted_stat = np.average(acc.luciano_guessed_items[nz] / acc.luciano_occurencies[nz])
 
-                print('K:', k)
-                print(acc.luciano_guessed_items[:10])
-                print(acc.luciano_occurencies[:10])
+                # print('K:', k)
+                # print(acc.luciano_guessed_items[:10])
+                # print(acc.luciano_occurencies[:10])
 
-                print(acc.luciano_guessed_items[nz].shape)
-                print(acc.luciano_occurencies[nz].shape)
+                # print(acc.luciano_guessed_items[nz].shape)
+                # print(acc.luciano_occurencies[nz].shape)
 
-                print('computed_acc.luciano_weighted_stat:', computed_acc.luciano_weighted_stat)
-                print('old:',(acc.luciano_guessed_items[nz].sum() / acc.luciano_occurencies[nz].sum()))
+                # print('computed_acc.luciano_weighted_stat:', computed_acc.luciano_weighted_stat)
+                # print('old:',(acc.luciano_guessed_items[nz].sum() / acc.luciano_occurencies[nz].sum()))
 
                 result[k] = computed_acc
 
@@ -108,7 +108,7 @@ class MetricAccumulator:
         - weighted hit rate
         - hitrate per popularity
 
-        :param x: user preferences, BS x items
+        :param x: user preferences, BS x items, if None then no warmup data is used
         :param y: user predictions, BS x items
         :param pos: list of positives
         :param neg: list of negatives
@@ -121,15 +121,20 @@ class MetricAccumulator:
         assert len(popularity) == y.shape[-1], f'{len(popularity)} != {y.shape[-1]}'
 
         for user in range(y.shape[0]):
-
-            input_idx = np.where(x[user, :] == 1)[0]  # indice degli oggetti in input per l'utente user
             score = y[user, :]  # score degli oggetti
 
-            viewed_item = set(input_idx)
-            positive_items = set(pos[user])
-            score[input_idx] = - np.inf  # hide viewed
-            predicted_item = positive_items - viewed_item  # si considerano solo gli oggetti non forniti in input
+            if x is not None:
+                input_idx = np.where(x[user, :] == 1)[0]  # indice degli oggetti in input per l'utente user
+                viewed_item = set(input_idx)
+                score[input_idx] = - np.inf  # hide viewed
+            else:
+                viewed_item = set()
 
+
+            positive_items = set(pos[user])
+
+            predicted_item = positive_items - viewed_item  # si considerano solo gli oggetti non forniti in input
+            # TODO: assert positive_items intersection viewed_item is 0
             ranked_idx = np.argsort(-score)  # indici degli items ordinati per score in modo decrescente
             ranked_top_k_idx = ranked_idx[:top_k]  # indici dei top K elementi (ordinati per score in modo decrescente)
 

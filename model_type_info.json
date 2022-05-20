@@ -1,0 +1,10 @@
+{
+  "BASELINE": "baseline",
+  "LOW": "low",
+  "MED": "medium",
+  "HIGH": "high",
+  "OVERSAMPLING": "oversampling",
+  "REWEIGHTING": "reweighting",
+  "U_SAMPLING": "uniform",
+  "SOUP": "soup"
+}
