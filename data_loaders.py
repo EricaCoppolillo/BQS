@@ -42,7 +42,7 @@ def rankdata(a):
 
 class DataLoader:
     def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100, alpha=None,
-                 gamma=None):
+                 gamma=None, width_param=None, model_name=None):
         try:
             print(self.submodel_type)
         except:
@@ -71,6 +71,10 @@ class DataLoader:
         self.pos_neg_ratio = pos_neg_ratio
         self.negatives_in_test = negatives_in_test
         self.model_type = model_type
+
+        self.width_param = width_param
+
+        self.model_name = model_name
 
         # IMPROVEMENT
         self.low_pop = len([i for i in self.item_popularity_dict["training"] if i <= self.thresholds[0]])
@@ -122,7 +126,11 @@ class DataLoader:
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
 
-                d_i = ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
+                if self.model_type == model_types.U_SAMPLING:
+                    d_i = 1
+                else:
+                    d_i = ((item_ranking[idx] / (self.high_pop * h)) + 1) # ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
+
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
@@ -154,13 +162,23 @@ class DataLoader:
         # checking if data have already been computed
         path = Path(file_tr)
         par_dir = path.parent.absolute()
+
+        print(file_tr)
+        print(par_dir)
+        print(self.model_name)
+
         if "bpr" in file_tr:
             preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr",
-                                                 self.model_type + self.submodel_type
+                                                 self.model_name
                                                  , f"decreasing_factor_{decreasing_factor}", str(seed))
         else:
-            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_type + self.submodel_type
+            preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_name
                                                  , f"decreasing_factor_{decreasing_factor}", str(seed))
+
+            if self.width_param is not None:
+                preprocessed_data_dir = os.path.join(preprocessed_data_dir, str(self.width_param))
+
+        print(preprocessed_data_dir)
 
         if not os.path.exists(preprocessed_data_dir):
             os.makedirs(preprocessed_data_dir)
@@ -715,7 +733,7 @@ class CachedDataLoader(DataLoader):
             self.h = h
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
-                d_i = ceil((item_ranking[idx] / (h * self.high_pop)) + 1)
+                d_i = ((item_ranking[idx] / (self.high_pop * h)) + 1) # ceil((item_ranking[idx] / (h * self.high_pop)) + 1)
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
@@ -1073,9 +1091,9 @@ CREATE TABLE testset (
 class EnsembleDataLoader(DataLoader):
     def __init__(self, data_dir, p_dims, seed, decreasing_factor, model_type=model_types.BASELINE,
                  pos_neg_ratio=4, negatives_in_test=100, alpha=None,
-                 gamma=None, device='cpu'):
+                 gamma=None, device='cpu', model_name=None):
         super().__init__(os.path.join(data_dir, 'data_rvae'), seed, decreasing_factor, model_type,
-                         pos_neg_ratio, negatives_in_test, alpha, gamma)
+                         pos_neg_ratio, negatives_in_test, alpha, gamma, model_name=model_name)
 
         # loading models
         print('Loading ensemble models...')
@@ -1622,8 +1640,8 @@ class EnsembleDataLoaderOld:
 
 
 class JannachDataLoader(DataLoader):
-    def __init__(self, width_param, *args, **kwargs):
-        self.width_param = width_param
+    def __init__(self, *args, **kwargs):
+        # self.width_param = width_param
         self.init_numpy_dict = False
         self.submodel_type = "jannach"
         super(JannachDataLoader, self).__init__(*args, **kwargs)
@@ -2053,7 +2071,7 @@ class InversePersonalizedPagerankNegativeSamplingDataLoader(DataLoader):
             for idx in range(len(item_popularity)):
                 f_i = item_popularity[idx]
 
-                d_i = ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
+                d_i = ((item_ranking[idx] / (self.high_pop * h)) + 1) # ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
@@ -2275,7 +2293,7 @@ class PersonalizedPagerankNegativeSamplingDataLoader(InversePersonalizedPagerank
 
 class BprDataLoader:
     def __init__(self, file_tr, seed, decreasing_factor, model_type, pos_neg_ratio=4, negatives_in_test=100,
-                 alpha=None, gamma=None):
+                 alpha=None, gamma=None, model_name=None):
         try:
             print(self.submodel_type)
         except:
@@ -2347,7 +2365,12 @@ class BprDataLoader:
                     h = ML20M_H_FACTOR
                 if "netflix" in self.file_tr:
                     h = NETFLIX_H_FACTOR
-                d_i = ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
+
+                if self.model_type == model_types.U_SAMPLING:
+                    d_i = 1
+                else:
+                    d_i = ((item_ranking[idx] / (self.high_pop * h)) + 1) #ceil((item_ranking[idx] / (self.high_pop * h)) + 1)
+
                 if f_i > 0:
                     if self.model_type == model_types.OVERSAMPLING:
                         n_i_decimal, n_int = modf(n * (max_popularity / (d_i * f_i)))
@@ -2386,7 +2409,7 @@ class BprDataLoader:
                 self.w_i = [1 / elem for elem in self.absolute_item_popularity]
 
         print('phase 1: Loading data...')
-        self._initialize(file_tr, dataset, decreasing_factor, seed)
+        self._initialize(file_tr, dataset, decreasing_factor, seed, model_name=model_name)
 
         # save item exposure and popularity
         base_path = file_tr[:-9]
@@ -2403,7 +2426,7 @@ class BprDataLoader:
 
         print('Done.')
 
-    def _initialize(self, file_tr, dataset, decreasing_factor, seed):
+    def _initialize(self, file_tr, dataset, decreasing_factor, seed, model_name):
         self.train_data = []
         self.val_data_tr = []
         self.val_data_te = []
@@ -2416,8 +2439,12 @@ class BprDataLoader:
         par_dir = path.parent.absolute()
 
         preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr",
-                                             self.model_type + self.submodel_type
+                                             model_name
                                              , f"decreasing_factor_{decreasing_factor}", str(seed))
+
+        # preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr",
+        #                                      self.model_type + self.submodel_type
+        #                                      , f"decreasing_factor_{decreasing_factor}", str(seed))
         print(preprocessed_data_dir)
         if not os.path.exists(preprocessed_data_dir):
             os.makedirs(preprocessed_data_dir)
@@ -2626,12 +2653,16 @@ class CachedBprDataLoader(BprDataLoader):
     def __del__(self):
         self._db.close()
 
-    def _initialize(self, file_tr, dataset, decreasing_factor, seed):
+    def _initialize(self, file_tr, dataset, decreasing_factor, seed, model_name):
         # checking if data have already been computed
         path = Path(file_tr)
         par_dir = path.parent.absolute()
-        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type
+
+        preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr",
+                                             model_name
                                              , f"decreasing_factor_{decreasing_factor}", str(seed))
+        # preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", "bpr", self.model_type
+        #                                      , f"decreasing_factor_{decreasing_factor}", str(seed))
 
         if not os.path.exists(preprocessed_data_dir):
             os.makedirs(preprocessed_data_dir)
@@ -2841,10 +2872,10 @@ class CachedBprDataLoader(BprDataLoader):
 class EnsembleBprDataLoader(BprDataLoader):
     def __init__(self, data_dir, p_dims, seed, decreasing_factor, model_type=model_types.BASELINE,
                  pos_neg_ratio=4, negatives_in_test=100, alpha=None,
-                 gamma=None, config=None, device='cpu'):
+                 gamma=None, config=None, device='cpu', model_name=None):
         file_tr = os.path.join(data_dir, f'data_{config.algorithm}')
         super().__init__(file_tr, seed, decreasing_factor, model_type,
-                         pos_neg_ratio, negatives_in_test, alpha, gamma)
+                         pos_neg_ratio, negatives_in_test, alpha, gamma, model_name=model_name)
 
         # loading models
         print('Loading ensemble models...')
@@ -2873,7 +2904,7 @@ class EnsembleBprDataLoader(BprDataLoader):
     def iter_ensemble(self, batch_size=256, tag='train', model_type="bpr", device="cpu"):
         raise NotImplemented()
 
-    def iter_test_ensemble(self, batch_size=256, tag='test', model_type="bpr", device="cpu"):
+    def iter_test_ensemble(self, batch_size=256, tag='test', device="cpu"):
         all_items = torch.arange(0, self.n_items, device=device, dtype=torch.long)
         all_items = all_items.repeat(batch_size, 1)
 
