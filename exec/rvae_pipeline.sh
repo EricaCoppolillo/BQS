@@ -29,9 +29,9 @@ for seed in "${seeds[@]}"; do
 
     # oversampling
     jsonStr=$(cat rvae_config.json)
-    jq '.model_type = "model_types.U_SAMPLING"' <<<"$jsonStr" > rvae_config.json
+    jq '.model_type = "model_types.OVERSAMPLING"' <<<"$jsonStr" > rvae_config.json
     jsonStr=$(cat rvae_config.json)
-    jq '.dir_name = "usampling_'$seed'"' <<<"$jsonStr" > rvae_config.json
+    jq '.dir_name = "oversampling_'$seed'"' <<<"$jsonStr" > rvae_config.json
     python3 rvae.py
 
 #   Competitors
