@@ -20,8 +20,6 @@ class bpr_loss(nn.Module):
         return loss_value
 
 
-
-
 class bpr_rank_pair_loss(bpr_loss):
     def __init__(self, device, **kargs):
         super(bpr_rank_pair_loss, self).__init__(**kargs)
@@ -157,8 +155,7 @@ class rvae_rank_pair_loss(rvae_loss):
         if model_type in (model_types.BASELINE,
                           model_types.REWEIGHTING,
                           model_types.OVERSAMPLING,
-                          model_types.U_SAMPLING,
-                          model_types.SOUP):
+                          model_types.U_SAMPLING):
             # assert mask.sum() > 0
             neg_ll = - (self.logsigmoid(y1 - y2) * weight) / mask.sum()
         else:
