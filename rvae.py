@@ -348,7 +348,9 @@ def evaluate(dataloader, popularity, tag='validation'):
                                            k)
 
     for k, values in accumulator.get_metrics().items():
+        print(values)
         for v in values.metric_names():
+            print(v)
             result[f'{v}@{k}'] = values[v]
 
     return result
