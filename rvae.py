@@ -107,7 +107,8 @@ if not config.cached_dataloader:
                                                                           model_type=model_type,
                                                                           beta_sampling=BETA_SAMPLING)
         else:
-            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
+            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type,
+                                                  model_name=model_type)
     else:
         if config.data_loader_type == "inverse_ppr":
             trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
@@ -146,7 +147,8 @@ if not config.cached_dataloader:
                                                                           beta_sampling=BETA_SAMPLING)
         else:
             trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma)
+                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma,
+                                                  model_name=model_type)
 else:
     print('USE CACHED DATALOADER')
     if model_type == model_types.BASELINE:
