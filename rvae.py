@@ -106,16 +106,6 @@ if not config.cached_dataloader:
                                                                           decreasing_factor=1,
                                                                           model_type=model_type,
                                                                           beta_sampling=BETA_SAMPLING)
-        elif config.data_loader_type == "stream":
-            trainloader = stream_data_loaders.StreamDataLoader(dataset_file, seed=SEED, decreasing_factor=1,
-                                                               model_type=model_type)
-        elif config.data_loader_type == "2stages":
-            trainloader = stream_data_loaders.TwoStagesNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
-                                                                                  decreasing_factor=1,
-                                                                                  model_type=model_type,
-                                                                                  beta_sampling=BETA_SAMPLING,
-                                                                                  device=device,
-                                                                                  model=None, model_class="rvae")
         else:
             trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
     else:
@@ -154,20 +144,6 @@ if not config.cached_dataloader:
                                                                           model_type=model_type, alpha=config.alpha,
                                                                           gamma=config.gamma,
                                                                           beta_sampling=BETA_SAMPLING)
-        elif config.data_loader_type == "stream":
-            trainloader = stream_data_loaders.StreamDataLoader(dataset_file, seed=SEED,
-                                                               decreasing_factor=config.decreasing_factor,
-                                                               model_type=model_type, alpha=config.alpha,
-                                                               gamma=config.gamma)
-        elif config.data_loader_type == "2stages":
-            trainloader = stream_data_loaders.TwoStagesNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
-                                                                                  decreasing_factor=config.decreasing_factor,
-                                                                                  model_type=model_type,
-                                                                                  alpha=config.alpha,
-                                                                                  gamma=config.gamma,
-                                                                                  beta_sampling=BETA_SAMPLING,
-                                                                                  device=device,
-                                                                                  model=None, model_class="rvae")
         else:
             trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
                                                   model_type=model_type, alpha=config.alpha, gamma=config.gamma)
