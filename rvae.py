@@ -82,37 +82,71 @@ to_pickle = True
 if not config.cached_dataloader:
     print(f"Model: {model_type}\nData Loader: {config.data_loader_type}")
     if model_type == model_types.BASELINE:
-        if config.data_loader_type == "jannach":
+        if config.data_loader_type == "inverse_ppr":
+            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                                             decreasing_factor=1,
+                                                                                             model_type=model_type)
+        elif config.data_loader_type == "ppr":
+            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                                      decreasing_factor=1,
+                                                                                      model_type=model_type)
+        elif config.data_loader_type == "jannach":
             trainloader = data_loaders.JannachDataLoader(file_tr=dataset_file, seed=SEED, decreasing_factor=1,
                                                          model_type=model_type,
-                                                         width_param=WIDTH_PARAM, model_name=model_type)
+                                                         width_param=WIDTH_PARAM)
         elif config.data_loader_type == "boratto":
             trainloader = data_loaders.BorattoNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
                                                                          decreasing_factor=1,
-                                                                         model_type=model_type, model_name=model_type)
+                                                                         model_type=model_type)
+        elif config.data_loader_type == "negative":
+            trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED, decreasing_factor=1,
+                                                                  model_type=model_type)
+        elif config.data_loader_type == "word2vec":
+            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
+                                                                          decreasing_factor=1,
+                                                                          model_type=model_type,
+                                                                          beta_sampling=BETA_SAMPLING)
         else:
-            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type
-                                                  , model_name=model_type)
+            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
     else:
-        if config.data_loader_type == "jannach":
+        if config.data_loader_type == "inverse_ppr":
+            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
+                                                                                             seed=SEED,
+                                                                                             decreasing_factor=config.decreasing_factor,
+                                                                                             model_type=model_type,
+                                                                                             alpha=config.alpha,
+                                                                                             gamma=config.gamma)
+        elif config.data_loader_type == "ppr":
+            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
+                                                                                      seed=SEED,
+                                                                                      decreasing_factor=config.decreasing_factor,
+                                                                                      model_type=model_type,
+                                                                                      alpha=config.alpha,
+                                                                                      gamma=config.gamma)
+        elif config.data_loader_type == "jannach":
             trainloader = data_loaders.JannachDataLoader(dataset_file, seed=SEED,
                                                          decreasing_factor=config.decreasing_factor,
                                                          model_type=model_type, alpha=config.alpha, gamma=config.gamma,
-                                                         width_param=WIDTH_PARAM, model_name=model_type)
+                                                         width_param=WIDTH_PARAM)
         elif config.data_loader_type == "boratto":
             trainloader = data_loaders.BorattoNegativeSamplingDataLoader(dataset_file, seed=SEED,
                                                                          decreasing_factor=config.decreasing_factor,
                                                                          model_type=model_type, alpha=config.alpha,
-                                                                         gamma=config.gamma, model_name=model_type)
+                                                                         gamma=config.gamma)
         elif config.data_loader_type == "negative":
             trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED,
                                                                   decreasing_factor=config.decreasing_factor,
                                                                   model_type=model_type, alpha=config.alpha,
-                                                                  gamma=config.gamma, model_name=model_type)
+                                                                  gamma=config.gamma)
+        elif config.data_loader_type == "word2vec":
+            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(dataset_file, seed=SEED,
+                                                                          decreasing_factor=config.decreasing_factor,
+                                                                          model_type=model_type, alpha=config.alpha,
+                                                                          gamma=config.gamma,
+                                                                          beta_sampling=BETA_SAMPLING)
         else:
             trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma,
-                                                  model_name=model_type)
+                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma)
 else:
     print('USE CACHED DATALOADER')
     if model_type == model_types.BASELINE:
@@ -348,9 +382,7 @@ def evaluate(dataloader, popularity, tag='validation'):
                                            k)
 
     for k, values in accumulator.get_metrics().items():
-        print(values)
         for v in values.metric_names():
-            print(v)
             result[f'{v}@{k}'] = values[v]
 
     return result
@@ -399,14 +431,14 @@ try:
 
         result['train_loss'] = train_loss
         stat_metric.append(result)
-        renaming_luciano_stat = {"weighted_hit_Rate@5": "weighted_hit_rate@5",
-                                 "hit_rate_by_pop@5": "hitrate_by_pop@5",
+        renaming_luciano_stat = {"weighted_luciano_stat@5": "weighted_hit_rate@5",
+                                 "luciano_stat_by_pop@5": "hitrate_by_pop@5",
                                  "train_loss": "train_loss", "loss": "loss"}
         print_metric = lambda k, v: f'{renaming_luciano_stat[k]}: {v:.4f}' if not isinstance(v, str) \
             else f'{renaming_luciano_stat[k]}: {v}'
         ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in
-                         ('train_loss', 'loss', 'weighted_hit_Rate@5',
-                          'hit_rate_by_pop@5')])
+                         ('train_loss', 'loss', 'weighted_luciano_stat@5',
+                          'luciano_stat_by_pop@5')])
         ss = f'| Epoch {epoch:3d} | time: {time.time() - epoch_start_time:4.2f}s | {ss} |'
         ls = len(ss)
         print('-' * ls)
@@ -414,19 +446,24 @@ try:
         print('-' * ls)
 
         # Save the model if the n100 is the best we've seen so far.
+        '''
+        if best_loss > result['loss']:
+            torch.save(model.state_dict(), file_model)
+            best_loss = result['loss']
+        '''
         LOW, MED, HIGH = 0, 1, 2
         if model_type in (model_types.BASELINE, model_types.REWEIGHTING, model_types.OVERSAMPLING, model_types.U_SAMPLING):
             val_result = result["loss"]
             if np.isinf(val_result) or np.isnan(val_result):
-                val_result = -float(result[f"hit_rate@{config.best_model_k_metric}"])
+                val_result = -float(result[f"luciano_stat@{config.best_model_k_metric}"])
         # in the following elif blocks, the value is multiplied by -1 to invert the objective (minimizing instead of
         # maximizing)
         elif model_type == model_types.LOW:
-            val_result = -float(result[f"hit_rate_by_pop@{config.best_model_k_metric}"].split(",")[LOW])
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[LOW])
         elif model_type == model_types.MED:
-            val_result = -float(result[f"hit_rate_by_pop@{config.best_model_k_metric}"].split(",")[MED])
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[MED])
         elif model_type == model_types.HIGH:
-            val_result = -float(result[f"hit_rate_by_pop@{config.best_model_k_metric}"].split(",")[HIGH])
+            val_result = -float(result[f"luciano_stat_by_pop@{config.best_model_k_metric}"].split(",")[HIGH])
         if val_result < best_loss:
             torch.save(model.state_dict(), file_model)
             best_loss = val_result
@@ -445,10 +482,10 @@ model.eval()
 """# Training stats"""
 
 renaming_luciano_stat = {"loss": "loss", "train_loss": "train_loss"}
-d1 = {f"recall_by_pop@{k}": f"recall_by_pop@{k}" for k in [1, 5, 10]}
-d2 = {f"hit_rate_by_pop@{k}": f"hit_rate_by_pop@{k}" for k in [1, 5, 10]}
-d3 = {f"hit_rate@{k}": f"hit_rate@{k}" for k in [1, 5, 10]}
-d4 = {f"weighted_hit_Rate@{k}": f"weighted_hit_Rate@{k}" for k in [1, 5, 10]}
+d1 = {f"luciano_recalled_by_pop@{k}": f"recall_by_pop@{k}" for k in [1, 5, 10]}
+d2 = {f"luciano_stat_by_pop@{k}": f"hit_rate_by_pop@{k}" for k in [1, 5, 10]}
+d3 = {f"luciano_stat@{k}": f"hit_rate@{k}" for k in [1, 5, 10]}
+d4 = {f"luciano_weighted_stat@{k}": f"weighted_hit_Rate@{k}" for k in [1, 5, 10]}
 renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4}
 
 print("Training Statistics: \n")
@@ -458,7 +495,7 @@ print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(stat_me
 # LOSS
 lossTrain = [x['train_loss'] for x in stat_metric]
 lossTest = [x['loss'] for x in stat_metric]
-lastHitRate = [x['hit_rate@5'] for x in stat_metric]
+lastHitRate = [x['luciano_stat@5'] for x in stat_metric]
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
 ax1.plot(lossTrain, color='b', )
@@ -478,7 +515,7 @@ axes = axes.ravel()
 i = 0
 
 for k in top_k:
-    hitRate = [x[f'hit_rate@{k}'] for x in stat_metric]
+    hitRate = [x[f'luciano_stat@{k}'] for x in stat_metric]
 
     ax = axes[i]
     i += 1
@@ -488,7 +525,7 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'hit_rate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'luciano_stat_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
@@ -564,7 +601,7 @@ with open(os.path.join(run_dir, 'result_test.json'), 'w') as fp:
 lossTrain = [x['train_loss'] for x in stat_metric]
 lossTest = [x['loss'] for x in stat_metric]
 
-lastHitRate = [x['hit_rate@5'] for x in stat_metric]
+lastHitRate = [x['luciano_stat@5'] for x in stat_metric]
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 8))
 ax1.plot(lossTrain, color='b', )
@@ -588,7 +625,7 @@ axes = axes.ravel()
 i = 0
 
 for k in top_k:
-    hitRate = [x[f'hit_rate@{k}'] for x in stat_metric]
+    hitRate = [x[f'luciano_stat@{k}'] for x in stat_metric]
 
     ax = axes[i]
     i += 1
@@ -598,7 +635,7 @@ for k in top_k:
 
 for j, name in enumerate('LessPop MiddlePop TopPop'.split()):
     for k in top_k:
-        hitRate = [float(x[f'hit_rate_by_pop@{k}'].split(',')[j]) for x in stat_metric]
+        hitRate = [float(x[f'luciano_stat_by_pop@{k}'].split(',')[j]) for x in stat_metric]
 
         ax = axes[i]
         i += 1
