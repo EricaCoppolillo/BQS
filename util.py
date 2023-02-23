@@ -86,8 +86,6 @@ def normalize_distr(matrix, method="norm"):
         raise Exception(f"method you passed: {method} not yet supported. Choose in [softmax, norm].")
 
 
-
-
 def _kl_div_2d(p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
     # D_KL(P || Q)
     batch, chans, height, width = p.shape

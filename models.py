@@ -209,40 +209,7 @@ class EnsembleMultiVAE(nn.Module):
     def forward(self, x, y_a, y_b, predict=False):
         z_a = torch.softmax(y_a, 1)
         z_b = torch.softmax(y_b, 1)
-
-
-        # if self.test_print:
-        #     print('ENSEMBLE TEST PRINT (train) ---------------------------------------')
-        #     print('Shape x, x[0]:', len(x), len(x[0]))
-        #     print('Shape y_a, y_a[0]:', len(y_a), len(y_a[0]))
-        #     print('Shape y_b, y_b[0]:', len(y_b), len(y_b[0]))
-        #     print('Shape popularity:', len(self.popularity))
-        #     print('Type popularity:', type(self.popularity))
-        #     print('x[0][:100]:', x[0][:100])
-        #     print('y_a[0][:100]:', y_a[0][:100])
-        #     print('y_b[0][:100]:', y_b[0][:100])
-        #     print('z_a[0][:100]:', z_a[0][:100])
-        #     print('z_b[0][:100]:', z_b[0][:100])
-        #     print('popularity:', self.popularity[:100])
-        #     print('filter a:', self.filter_a[:100])
-        #     print('filter b:', self.filter_b[:100])
-        #     print('thresholds:', self.thresholds)
-        #     print('-------------------------------------------------------------------')
-        #     self.test_print = False
-
-        # baseline = False
-
-        # if baseline:
-        #     y_e = z_a
-        # else:
-        #     # y_e = z_a * self.filter_a + z_b * self.filter_b * gamma
-
         y_e = z_a + z_b * self.gamma
-
-        # y_e = (1-self.mask) * z_a + self.mask * z_b * self.gamma
-
-        # y_e = z_a + self.mask * z_b * self.gamma
-        
         return y_e
 
     def init_weights(self):
