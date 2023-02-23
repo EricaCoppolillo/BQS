@@ -82,71 +82,37 @@ to_pickle = True
 if not config.cached_dataloader:
     print(f"Model: {model_type}\nData Loader: {config.data_loader_type}")
     if model_type == model_types.BASELINE:
-        if config.data_loader_type == "inverse_ppr":
-            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                                             decreasing_factor=1,
-                                                                                             model_type=model_type)
-        elif config.data_loader_type == "ppr":
-            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                                      decreasing_factor=1,
-                                                                                      model_type=model_type)
-        elif config.data_loader_type == "jannach":
+        if config.data_loader_type == "jannach":
             trainloader = data_loaders.JannachDataLoader(file_tr=dataset_file, seed=SEED, decreasing_factor=1,
                                                          model_type=model_type,
-                                                         width_param=WIDTH_PARAM)
+                                                         width_param=WIDTH_PARAM, model_name=model_type)
         elif config.data_loader_type == "boratto":
             trainloader = data_loaders.BorattoNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
                                                                          decreasing_factor=1,
-                                                                         model_type=model_type)
-        elif config.data_loader_type == "negative":
-            trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED, decreasing_factor=1,
-                                                                  model_type=model_type)
-        elif config.data_loader_type == "word2vec":
-            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(file_tr=dataset_file, seed=SEED,
-                                                                          decreasing_factor=1,
-                                                                          model_type=model_type,
-                                                                          beta_sampling=BETA_SAMPLING)
+                                                                         model_type=model_type, model_name=model_type)
         else:
-            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type)
+            trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=1, model_type=model_type
+                                                  , model_name=model_type)
     else:
-        if config.data_loader_type == "inverse_ppr":
-            trainloader = data_loaders.InversePersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
-                                                                                             seed=SEED,
-                                                                                             decreasing_factor=config.decreasing_factor,
-                                                                                             model_type=model_type,
-                                                                                             alpha=config.alpha,
-                                                                                             gamma=config.gamma)
-        elif config.data_loader_type == "ppr":
-            trainloader = data_loaders.PersonalizedPagerankNegativeSamplingDataLoader(dataset_file,
-                                                                                      seed=SEED,
-                                                                                      decreasing_factor=config.decreasing_factor,
-                                                                                      model_type=model_type,
-                                                                                      alpha=config.alpha,
-                                                                                      gamma=config.gamma)
-        elif config.data_loader_type == "jannach":
+        if config.data_loader_type == "jannach":
             trainloader = data_loaders.JannachDataLoader(dataset_file, seed=SEED,
                                                          decreasing_factor=config.decreasing_factor,
                                                          model_type=model_type, alpha=config.alpha, gamma=config.gamma,
-                                                         width_param=WIDTH_PARAM)
+                                                         width_param=WIDTH_PARAM, model_name=model_type)
         elif config.data_loader_type == "boratto":
             trainloader = data_loaders.BorattoNegativeSamplingDataLoader(dataset_file, seed=SEED,
                                                                          decreasing_factor=config.decreasing_factor,
                                                                          model_type=model_type, alpha=config.alpha,
-                                                                         gamma=config.gamma)
+                                                                         gamma=config.gamma, model_name=model_type)
         elif config.data_loader_type == "negative":
             trainloader = data_loaders.NegativeSamplingDataLoader(dataset_file, seed=SEED,
                                                                   decreasing_factor=config.decreasing_factor,
                                                                   model_type=model_type, alpha=config.alpha,
-                                                                  gamma=config.gamma)
-        elif config.data_loader_type == "word2vec":
-            trainloader = data_loaders.Word2VecNegativeSamplingDataLoader(dataset_file, seed=SEED,
-                                                                          decreasing_factor=config.decreasing_factor,
-                                                                          model_type=model_type, alpha=config.alpha,
-                                                                          gamma=config.gamma,
-                                                                          beta_sampling=BETA_SAMPLING)
+                                                                  gamma=config.gamma, model_name=model_type)
         else:
             trainloader = data_loaders.DataLoader(dataset_file, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma)
+                                                  model_type=model_type, alpha=config.alpha, gamma=config.gamma,
+                                                  model_name=model_type)
 else:
     print('USE CACHED DATALOADER')
     if model_type == model_types.BASELINE:
