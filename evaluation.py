@@ -10,6 +10,7 @@ class SimpleMetric:
         self.weighted_recall_den = 0
         self.hitrate = 0
         self.weighted_hitrate = 0
+        self.weighted_hit_rate = 0
         self.hitrate_by_pop = np.zeros(3)
         self.hitrate_by_pop_users = np.zeros(3)
         self.recalled_by_pop = np.zeros(3)
