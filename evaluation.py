@@ -16,10 +16,10 @@ class SimpleMetric:
         self.positives_by_pop = np.zeros(3)
         self._num_users = 0
 
-        self.stat_by_pop = np.zeros(3)
-        self.weighted_stat = 0
-        self.occurencies = None
-        self.guessed_items = None
+        self.new_stat_by_pop = np.zeros(3)
+        self.new_weighted_stat = 0
+        self.new_occurencies = None
+        self.new_guessed_items = None
 
     def metric_names(self):
         return ('recall',
@@ -76,12 +76,12 @@ class MetricAccumulator:
                 computed_acc.recalled_by_pop = acc.recalled_by_pop
                 computed_acc.positives_by_pop = acc.positives_by_pop
 
-                computed_acc.new_recalled_by_pop = acc.stat_by_pop
-                computed_acc.stat_by_pop = acc.stat_by_pop / acc.positives_by_pop
-                computed_acc.new_stat = acc.stat_by_pop.sum() / acc.positives_by_pop.sum()
-                nz = np.nonzero(acc.occurencies)[0]
+                computed_acc.new_recalled_by_pop = acc.new_stat_by_pop
+                computed_acc.new_stat_by_pop = acc.new_stat_by_pop / acc.positives_by_pop
+                computed_acc.new_stat = acc.new_stat_by_pop.sum() / acc.positives_by_pop.sum()
+                nz = np.nonzero(acc.new_occurencies)[0]
 
-                computed_acc.weighted_stat = np.average(acc.guessed_items[nz] / acc.occurencies[nz])
+                computed_acc.new_weighted_stat = np.average(acc.new_guessed_items[nz] / acc.new_occurencies[nz])
 
                 result[k] = computed_acc
 
@@ -141,9 +141,9 @@ class MetricAccumulator:
             weights_P_u_c = sum([1 - popularity[i] for i in P_u_c])  # Denominatore
 
             accumulator = self.data[top_k]
-            if accumulator.occurencies is None:
-                accumulator.occurencies = np.zeros(len(popularity))
-                accumulator.guessed_items = np.zeros(len(popularity))
+            if accumulator.new_occurencies is None:
+                accumulator.new_occurencies = np.zeros(len(popularity))
+                accumulator.new_guessed_items = np.zeros(len(popularity))
 
             accumulator._num_users += 1
 
@@ -210,10 +210,10 @@ class MetricAccumulator:
                     idx = 2
 
                 accumulator.positives_by_pop[idx] += 1
-                accumulator.occurencies[pos_item] += 1
+                accumulator.new_occurencies[pos_item] += 1
                 if score_pos > score_top_k:
-                    accumulator.stat_by_pop[idx] += 1
-                    accumulator.guessed_items[pos_item] += 1
+                    accumulator.new_stat_by_pop[idx] += 1
+                    accumulator.new_guessed_items[pos_item] += 1
 
 
 if __name__ == '__main__':
