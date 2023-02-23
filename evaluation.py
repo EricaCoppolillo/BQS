@@ -77,6 +77,7 @@ class MetricAccumulator:
                 computed_acc.hitrate = acc.hitrate / acc._num_users
                 computed_acc.weighted_hitrate = acc.weighted_hitrate / acc._num_users
                 computed_acc.hitrate_by_pop = acc.hitrate_by_pop / acc.hitrate_by_pop_users
+                computed_acc.hit_rate_by_pop = acc.hitrate_by_pop / acc.hitrate_by_pop_users
                 computed_acc.recalled_by_pop = acc.recalled_by_pop
                 computed_acc.positives_by_pop = acc.positives_by_pop
 
