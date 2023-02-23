@@ -20,10 +20,10 @@ class SimpleMetric:
         self.positives_by_pop = np.zeros(3)
         self._num_users = 0
 
-        self.luciano_stat_by_pop = np.zeros(3)
-        self.luciano_weighted_stat = 0
-        self.luciano_occurencies = None
-        self.luciano_guessed_items = None
+        self.stat_by_pop = np.zeros(3)
+        self.weighted_stat = 0
+        self.occurencies = None
+        self.guessed_items = None
 
     def metric_names(self):
         return ('recall',
@@ -80,15 +80,13 @@ class MetricAccumulator:
                 computed_acc.recalled_by_pop = acc.recalled_by_pop
                 computed_acc.positives_by_pop = acc.positives_by_pop
 
-                # Luciano's metrics
-                computed_acc.luciano_recalled_by_pop = acc.luciano_stat_by_pop
-                computed_acc.luciano_stat_by_pop = acc.luciano_stat_by_pop / acc.positives_by_pop
-                computed_acc.luciano_stat = acc.luciano_stat_by_pop.sum() / acc.positives_by_pop.sum()
-                # computed_acc.weighted_luciano_stat = acc.weighted_luciano_stat / acc.positives_by_pop.sum()
-                nz = np.nonzero(acc.luciano_occurencies)[0]
+                computed_acc.recall_by_pop = acc.stat_by_pop
+                computed_acc.stat_by_pop = acc.stat_by_pop / acc.positives_by_pop
+                computed_acc.hit_rate = acc.stat_by_pop.sum() / acc.positives_by_pop.sum()
+                nz = np.nonzero(acc.occurencies)[0]
 
-                computed_acc.luciano_weighted_stat = np.average(
-                    acc.luciano_guessed_items[nz] / acc.luciano_occurencies[nz])
+                computed_acc.weighted_stat = np.average(
+                    acc.guessed_items[nz] / acc.occurencies[nz])
 
                 result[k] = computed_acc
 
@@ -141,9 +139,9 @@ class MetricAccumulator:
             weights_P_u_c = sum([1 - popularity[i] for i in P_u_c])  # Denominatore
 
             accumulator = self.data[top_k]
-            if accumulator.luciano_occurencies is None:
-                accumulator.luciano_occurencies = np.zeros(len(popularity))
-                accumulator.luciano_guessed_items = np.zeros(len(popularity))
+            if accumulator.occurencies is None:
+                accumulator.occurencies = np.zeros(len(popularity))
+                accumulator.guessed_items = np.zeros(len(popularity))
 
             accumulator._num_users += 1
 
@@ -200,12 +198,10 @@ class MetricAccumulator:
                     idx = 2
 
                 accumulator.positives_by_pop[idx] += 1
-                accumulator.luciano_occurencies[pos_item] += 1
+                accumulator.occurencies[pos_item] += 1
                 if score_pos > score_top_k:
-                    accumulator.luciano_stat_by_pop[idx] += 1
-                    # accumulator.weighted_luciano_stat += (1 - current_popularity)
-                    # accumulator.luciano_weighted_stat += (1 / current_popularity)
-                    accumulator.luciano_guessed_items[pos_item] += 1
+                    accumulator.stat_by_pop[idx] += 1
+                    accumulator.guessed_items[pos_item] += 1
 
 
 if __name__ == '__main__':
