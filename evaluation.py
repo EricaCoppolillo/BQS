@@ -29,7 +29,7 @@ class SimpleMetric:
                 'hitrate_by_pop',
                 'recalled_by_pop',
                 'positives_by_pop',
-                'weighted_hit_Rate',
+                'weighted_hit_rate',
                 'hit_rate',
                 'hit_rate_by_pop',
                 'recall_by_pop')
