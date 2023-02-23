@@ -1,7 +1,7 @@
 {
   "CUDA_VISIBLE_DEVICES": "3",
   "dataset_name": "datasets.MOVIELENS_1M",
-  "model_type": "model_types.SOUP",
+  "model_type": "model_types.BASELINE",
   "copy_pasting_data": "True",
   "alpha": "0.17",
   "gamma": "2.6",
