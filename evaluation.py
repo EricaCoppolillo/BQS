@@ -184,6 +184,7 @@ class MetricAccumulator:
                     accumulator.recalled_by_pop[idx] += len(H_u)
 
                     accumulator.hitrate_by_pop_users[idx] += 1
+                    accumulator.hit_rate_by_pop_users[idx] += 1
 
             neg_scores = sorted(score[neg[user]].tolist(), reverse=True)
             score_top_k = neg_scores[top_k - 1]
