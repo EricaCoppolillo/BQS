@@ -172,6 +172,10 @@ class DataLoader:
                                                  self.model_name
                                                  , f"decreasing_factor_{decreasing_factor}", str(seed))
         else:
+            print(par_dir)
+            print(self.model_name)
+            print(seed)
+            print(decreasing_factor)
             preprocessed_data_dir = os.path.join(par_dir, "preprocessed_data", self.model_name
                                                  , f"decreasing_factor_{decreasing_factor}", str(seed))
 
