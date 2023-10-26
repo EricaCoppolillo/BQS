@@ -1,7 +1,8 @@
 # pick dataset(s) of interest - MOVIELENS_1M CITEULIKE PINTEREST YAHOO AMAZON_GGF
-declare -a datasets=("PINTEREST" "AMAZON_GGF" "YAHOO" "PINTEREST" "CITEULIKE" "MOVIELENS_1M")
+declare -a datasets=("AMAZON_GGF" "YAHOO" "PINTEREST" "CITEULIKE" "MOVIELENS_1M")
+#
 
-cuda="3"
+cuda="1"
 # moving in the parent directory
 cd ../
 declare -a seeds=(12121995 230782 190291 81163 100362)
@@ -20,18 +21,26 @@ for seed in "${seeds[@]}"; do
     jsonStr=$(cat rvae_config.json)
     jq '.regularizer = ""' <<<"$jsonStr" > rvae_config.json
     jsonStr=$(cat rvae_config.json)
+    jq '.n_epochs = 20' <<<"$jsonStr" > rvae_config.json # 50
+    jsonStr=$(cat rvae_config.json)
     jq '.data_loader_type = ""' <<<"$jsonStr" > rvae_config.json
     jsonStr=$(cat rvae_config.json)
     jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > rvae_config.json
     jsonStr=$(cat rvae_config.json)
     jq '.dir_name = "baseline_'$seed'"' <<<"$jsonStr" > rvae_config.json
-    python3 rvae.py
+     python3 rvae.py
 
     # oversampling
     jsonStr=$(cat rvae_config.json)
     jq '.model_type = "model_types.OVERSAMPLING"' <<<"$jsonStr" > rvae_config.json
     jsonStr=$(cat rvae_config.json)
     jq '.dir_name = "oversampling_'$seed'"' <<<"$jsonStr" > rvae_config.json
+    python3 rvae.py
+
+    jsonStr=$(cat rvae_config.json)
+    jq '.model_type = "model_types.U_SAMPLING"' <<<"$jsonStr" > rvae_config.json
+    jsonStr=$(cat rvae_config.json)
+    jq '.dir_name = "usampling_'$seed'"' <<<"$jsonStr" > rvae_config.json
     python3 rvae.py
 
 #   Competitors

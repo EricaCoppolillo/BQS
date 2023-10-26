@@ -1,7 +1,7 @@
 # pick dataset(s) of interest - MOVIELENS_1M MOVIELENS_20M CITEULIKE PINTEREST EPINIONS NETFLIX YAHOO COAT AMAZON_GGF
-declare -a datasets=("MOVIELENS_1M" "CITEULIKE" "YAHOO" "PINTEREST" "AMAZON_GGF")
+declare -a datasets=("AMAZON_GGF" "MOVIELENS_1M" "CITEULIKE" "YAHOO" "PINTEREST")
 
-cuda="3"
+cuda="1"
 bpr_config_file="bpr_config.json"
 
 # moving in the parent directory
@@ -22,12 +22,14 @@ for seed in "${seeds[@]}"; do
     jsonStr=$(cat $bpr_config_file)
     jq '.regularizer = ""' <<<"$jsonStr" > $bpr_config_file
     jsonStr=$(cat $bpr_config_file)
+    jq '.n_epochs = 5' <<<"$jsonStr" > $bpr_config_file # 50
+    jsonStr=$(cat $bpr_config_file)
     jq '.data_loader_type = ""' <<<"$jsonStr" > $bpr_config_file
     jsonStr=$(cat $bpr_config_file)
     jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > $bpr_config_file
     jsonStr=$(cat $bpr_config_file)
     jq '.dir_name = "baseline_'$seed'"' <<<"$jsonStr" > $bpr_config_file
-    python3 bpr.py $bpr_config_file
+     python3 bpr.py $bpr_config_file
 
     # oversampling
     jsonStr=$(cat $bpr_config_file)
@@ -36,8 +38,14 @@ for seed in "${seeds[@]}"; do
     jq '.dir_name = "oversampling_'$seed'"' <<<"$jsonStr" > $bpr_config_file
     python3 bpr.py $bpr_config_file
 
+    jsonStr=$(cat $bpr_config_file)
+    jq '.model_type = "model_types.U_SAMPLING"' <<<"$jsonStr" > $bpr_config_file
+    jsonStr=$(cat $bpr_config_file)
+    jq '.dir_name = "usampling_'$seed'"' <<<"$jsonStr" > $bpr_config_file
+    python3 bpr.py $bpr_config_file
+
     # Competitors
-    # jannach
+#    # jannach
     jannach_weight="2.25"
     jsonStr=$(cat $bpr_config_file)
     jq '.model_type = "model_types.BASELINE"' <<<"$jsonStr" > $bpr_config_file

@@ -61,12 +61,14 @@ else:
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
-run_time = datetime.today().strftime('%Y%m%d_%H%M')
+# run_time = datetime.today().strftime('%Y%m%d_%H%M')
 
 type_str = 'ensemble'
-run_dir = os.path.join(result_dir, f'{type_str}_{run_time}')
+# run_dir = os.path.join(result_dir, f'{type_str}_{run_time}')
+run_dir = os.path.join(result_dir, config.dir_name)
 
-os.makedirs(run_dir, exist_ok=True)
+if not os.path.exists(run_dir):
+    os.makedirs(run_dir)
 
 # TODO: include learning params
 file_model = os.path.join(result_dir, 'best_model.pth')
@@ -81,14 +83,15 @@ In train the data is reported with a mask of *x* items selected randomly between
 
 In test the data is reported with 3 masks of items with less, middle and top popolarity
 """
+model_name = config.dir_name.split("_")[0]
 
 # Dataloader
 if config.algorithm == 'rvae':
     trainloader = EnsembleDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                 device=device, config=config)
+                                 device=device, model_name=model_name)
 else:
     trainloader = EnsembleBprDataLoader(data_dir, config.p_dims, seed=SEED, decreasing_factor=config.decreasing_factor,
-                                 device=device, config=config)
+                                 device=device, config=config, model_name=model_name)
 
 
 n_items = trainloader.n_items
@@ -118,7 +121,6 @@ def evaluate(dataloader, tag='validation'):
     with torch.no_grad():
         for batch_idx, (x, pos, neg, mask, pos_te, neg_te, mask_te, y_a, y_b) in enumerate(
                 dataloader.iter_test_ensemble(batch_size=bs,
-                                              model_type=config.algorithm,
                                               tag=tag, device=device)):
             batch_num += 1
 
@@ -145,7 +147,8 @@ def evaluate(dataloader, tag='validation'):
 
             del y_a, y_b, y
 
-            if x_input:
+            # DEBUG
+            if x_input is not None:
                 x_input = x_input.cpu().numpy()
 
             for k in top_k:
@@ -154,7 +157,7 @@ def evaluate(dataloader, tag='validation'):
                                            pos_te, neg_te,
                                            popularity,
                                            dataloader.thresholds,
-                                           k)
+                                           k, dataloader.n_users_dict["test"])
 
     for k, values in accumulator.get_metrics().items():
         for v in values.metric_names():
@@ -249,7 +252,9 @@ def train_ensemble():
             stat_metric.append(result)
             renaming_luciano_stat = {"weighted_luciano_stat@5": "weighted_hit_rate@5",
                                      "luciano_stat_by_pop@5": "hitrate_by_pop@5",
-                                     "train_loss": "train_loss", "loss": "loss"}
+                                     "train_loss": "train_loss", "loss": "loss", "arp":"arp",
+                                     "positive_arp":"positive_arp", "negative_arp":"negative_arp",
+                                     "aplt":"aplt", "aclt":"aclt", "reo":"reo"}
             print_metric = lambda k, v: f'{renaming_luciano_stat[k]}: {v:.4f}' if not isinstance(v, str) \
                 else f'{renaming_luciano_stat[k]}: {v}'
             ss = ' | '.join([print_metric(k, v) for k, v in stat_metric[-1].items() if k in
@@ -277,7 +282,16 @@ def train_ensemble():
     d2 = {f"luciano_stat_by_pop@{k}": f"hit_rate_by_pop@{k}" for k in [1, 5, 10]}
     d3 = {f"luciano_stat@{k}": f"hit_rate@{k}" for k in [1, 5, 10]}
     d4 = {f"luciano_weighted_stat@{k}": f"weighted_hit_Rate@{k}" for k in [1, 5, 10]}
-    renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4}
+    d5 = {f"arp@{k}": f"arp@{k}" for k in [1, 5, 10]}
+    d6 = {f"positve_arp@{k}": f"positive_arp@{k}" for k in [1, 5, 10]}
+    d7 = {f"negative_arp@{k}": f"negative_arp@{k}" for k in [1, 5, 10]}
+    d8 = {f"aplt@{k}": f"aplt@{k}" for k in [1, 5, 10]}
+    d9 = {f"aclt@{k}": f"aclt@{k}" for k in [1, 5, 10]}
+    d10 = {f"reo@{k}": f"reo@{k}" for k in [1, 5, 10]}
+    d11 = {f"ndcg@{k}": f"ndcg@{k}" for k in [1, 5, 10]}
+    d12 = {f"ndcg_by_pop@{k}": f"ndcg_by_pop@{k}" for k in [1, 5, 10]}
+    renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4,
+                             **d5, **d6, **d7, **d8, **d9, **d10, **d11, **d12}
 
     print("Training Statistics: \n")
     print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(stat_metric[-1].items())
@@ -362,7 +376,16 @@ d1 = {f"luciano_recalled_by_pop@{k}": f"recall_by_pop@{k}" for k in [1, 5, 10]}
 d2 = {f"luciano_stat_by_pop@{k}": f"hit_rate_by_pop@{k}" for k in [1, 5, 10]}
 d3 = {f"luciano_stat@{k}": f"hit_rate@{k}" for k in [1, 5, 10]}
 d4 = {f"luciano_weighted_stat@{k}": f"weighted_hit_Rate@{k}" for k in [1, 5, 10]}
-renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4}
+d5 = {f"arp@{k}": f"arp@{k}" for k in [1, 5, 10]}
+d6 = {f"positive_arp@{k}": f"positive_arp@{k}" for k in [1, 5, 10]}
+d7 = {f"negative_arp@{k}": f"negative_arp@{k}" for k in [1, 5, 10]}
+d8 = {f"aplt@{k}": f"aplt@{k}" for k in [1, 5, 10]}
+d9 = {f"aclt@{k}": f"aclt@{k}" for k in [1, 5, 10]}
+d10 = {f"reo@{k}": f"reo@{k}" for k in [1, 5, 10]}
+d11 = {f"ndcg@{k}": f"ndcg@{k}" for k in [1, 5, 10]}
+d12 = {f"ndcg_by_pop@{k}": f"ndcg_by_pop@{k}" for k in [1, 5, 10]}
+renaming_luciano_stat = {**renaming_luciano_stat, **d1, **d2, **d3, **d4,
+                         **d5, **d6, **d7, **d8, **d9, **d10, **d11, **d12}
 
 print('\n'.join([f'{renaming_luciano_stat[k]:<23}{v}' for k, v in sorted(result_test.items())
                  if k in renaming_luciano_stat]))

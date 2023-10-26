@@ -1,5 +1,6 @@
 # pick dataset(s) of interest - MOVIELENS_1M CITEULIKE PINTEREST YAHOO AMAZON_GGF
-declare -a datasets=("MOVIELENS_1M" "PINTEREST" "YAHOO" "AMAZON_GGF" "CITEULIKE")
+declare -a datasets=("MOVIELENS_1M" "PINTEREST" "YAHOO" "CITEULIKE" "AMAZON_GGF")
+declare -A deltas_dict=( ["MOVIELENS_1M"]="0.40" ["PINTEREST"]="0.60" ["YAHOO"]="0.55" ["AMAZON_GGF"]="0.20" ["CITEULIKE"]="0.70")
 
 cuda="1"
 # moving in the parent directory
@@ -30,35 +31,38 @@ for seed in "${seeds[@]}"; do
     # training the baseline
     jsonStr=$(cat rvae_config.json)
     jq '.dir_name = "baseline_'$seed'"' <<<"$jsonStr" > rvae_config.json
-    python3 rvae.py
+    # python3 rvae.py
+
     jsonStr=$(cat rvae_config.json)
     jq '.model_type = "model_types.LOW"' <<<"$jsonStr" > rvae_config.json
 
     # training the low model
     jsonStr=$(cat rvae_config.json)
-    jq '.dir_name = "ensemble_'$seed'"' <<<"$jsonStr" > rvae_config.json
-    python3 rvae.py
+    jq '.dir_name = "low_'$seed'"' <<<"$jsonStr" > rvae_config.json
+    # python3 rvae.py
 
-    for ensemble_weight in $(seq 0.05 0.05 1.0); do
-      sleep 60s
-      echo "Evaluating Ensemble..."
-      new_ensemble_weight="${ensemble_weight//,/.}"
-      jsonStr=$(cat ensemble_config.json)
-      jq '.ensemble_weight = '$new_ensemble_weight <<<"$jsonStr" > ensemble_config.json
-      jsonStr=$(cat ensemble_config.json)
-      jq '.seed = '$seed <<<"$jsonStr" > ensemble_config.json
-      jsonStr=$(cat ensemble_config.json)
-      jq '.algorithm = "rvae"' <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.dataset_name = "datasets.'$dataset_name'"' <<<"$jsonStr" > ensemble_config.json
-      jsonStr=$(cat ensemble_config.json)
-      jq '.model_type = "simple"' <<<"$jsonStr" > ensemble_config.json
-      jsonStr=$(cat ensemble_config.json)
-      jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > ensemble_config.json
-      jsonStr=$(cat ensemble_config.json)
-      jq '.dir_name = "ensemble_'$seed'_'$new_ensemble_weight'"' <<<"$jsonStr" > ensemble_config.json
-      # running the ensemble model
-      python3 ensemble.py $ensemble_config_file
-    done
+#    for ensemble_weight in $(seq 0.05 0.05 1.0); do
+#      echo "Evaluating Ensemble..."
+#      new_ensemble_weight="${ensemble_weight//,/.}"
+#      echo $new_ensemble_weight
+    new_ensemble_weight="${deltas_dict[$dataset_name]}"
+    jsonStr=$(cat ensemble_config.json)
+    jq '.ensemble_weight = '$new_ensemble_weight <<<"$jsonStr" > ensemble_config.json
+    jsonStr=$(cat ensemble_config.json)
+    jq '.seed = '$seed <<<"$jsonStr" > ensemble_config.json
+    jsonStr=$(cat ensemble_config.json)
+    jq '.algorithm = "rvae"' <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.dataset_name = "datasets.'$dataset_name'"' <<<"$jsonStr" > ensemble_config.json
+    jsonStr=$(cat ensemble_config.json)
+    jq '.model_type = "simple"' <<<"$jsonStr" > ensemble_config.json
+    jsonStr=$(cat ensemble_config.json)
+    jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > ensemble_config.json
+    jsonStr=$(cat ensemble_config.json)
+    jq '.dir_name = "newensemble_'$seed'_'$new_ensemble_weight'"' <<<"$jsonStr" > ensemble_config.json
+    # running the ensemble model
+    python3 ensemble.py $ensemble_config_file
+#      sleep 60s
+#    done
   done
 done

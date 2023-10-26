@@ -1,5 +1,7 @@
 # pick dataset(s) of interest - MOVIELENS_1M CITEULIKE PINTEREST YAHOO AMAZON_GGF
-declare -a datasets=("PINTEREST" "AMAZON_GGF")
+declare -a datasets=("AMAZON_GGF" "MOVIELENS_1M" "PINTEREST" "YAHOO" "CITEULIKE")
+declare -A deltas_dict=( ["MOVIELENS_1M"]="0.753571" ["PINTEREST"]="0.000001" ["YAHOO"]="0.000027" ["AMAZON_GGF"]="0.000001" ["CITEULIKE"]="0.000001")
+
 
 cuda="1"
 bpr_config_file="bpr_config.json"
@@ -30,7 +32,7 @@ for seed in "${seeds[@]}"; do
     jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > $bpr_config_file
     jsonStr=$(cat $bpr_config_file)
     jq '.dir_name = "low_'$seed'"' <<<"$jsonStr" > $bpr_config_file
-    python3 bpr.py $bpr_config_file
+    # python3 bpr.py $bpr_config_file
 
 #    Low for Ensemble
     jsonStr=$(cat $bpr_config_file)
@@ -38,32 +40,39 @@ for seed in "${seeds[@]}"; do
     jsonStr=$(cat $bpr_config_file)
     jq '.cached_dataloader = "False"' <<<"$jsonStr" > $bpr_config_file
     jsonStr=$(cat $bpr_config_file)
-    jq '.dir_name = "newbaseline_'$seed'"' <<<"$jsonStr" > $bpr_config_file
+    jq '.dir_name = "baseline_'$seed'"' <<<"$jsonStr" > $bpr_config_file
     # training the low model
-    python3 bpr.py $bpr_config_file
+    # python3 bpr.py $bpr_config_file
 
 #     Ensemble
-    for ensemble_weight in $(seq 0.00005 0.00005 0.00045); do
-      sleep 60s
-      new_ensemble_weight="${ensemble_weight//,/.}"
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.ensemble_weight = '$new_ensemble_weight <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.latent_dim = "32"' <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.algorithm = "bpr"' <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.seed = '$seed <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.dataset_name = "datasets.'$dataset_name'"' <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.model_type = "simple"' <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > $ensemble_config_file
-      jsonStr=$(cat $ensemble_config_file)
-      jq '.dir_name = "newensemble_'$seed'_'$new_ensemble_weight'"' <<<"$jsonStr" > $ensemble_config_file
-      # running the ensemble model
-      python3 ensemble.py $ensemble_config_file
-    done
+#    for x in $(seq 0.1 0.1 10); do
+#      newx=${x//,/.}
+#      ensemble_weight=$(echo "0.001 * $newx ^ 3" | bc -l) # $(($newx**3))
+#      echo $ensemble_weight
+#      echo "Evaluating Ensemble..."
+#      new_ensemble_weight="0""${ensemble_weight//,/.}"
+#      echo $new_ensemble_weight
+
+    new_ensemble_weight="${deltas_dict[$dataset_name]}"
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.ensemble_weight = '$new_ensemble_weight <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.latent_dim = "32"' <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.algorithm = "bpr"' <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.seed = '$seed <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.dataset_name = "datasets.'$dataset_name'"' <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.model_type = "simple"' <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.CUDA_VISIBLE_DEVICES = "'$cuda'"' <<<"$jsonStr" > $ensemble_config_file
+    jsonStr=$(cat $ensemble_config_file)
+    jq '.dir_name = "newensemble_'$seed'_'$new_ensemble_weight'"' <<<"$jsonStr" > $ensemble_config_file
+    # running the ensemble model
+    python3 ensemble.py $ensemble_config_file
+#    sleep 60s
+#    done
   done
 done
