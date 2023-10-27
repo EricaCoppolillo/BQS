@@ -1,11 +1,11 @@
 {
-  "CUDA_VISIBLE_DEVICES": "3",
-  "dataset_name": "datasets.MOVIELENS_1M",
+  "CUDA_VISIBLE_DEVICES": "1",
+  "dataset_name": "datasets.CITEULIKE",
   "model_type": "model_types.BASELINE",
   "copy_pasting_data": "True",
   "alpha": "None",
   "gamma": "None",
-  "n_epochs": 1,
+  "n_epochs": 20,
   "batch_size": 1024,
   "weight_decay": 0,
   "learning_rate": 0.001,
@@ -26,11 +26,12 @@
   "best_model_k_metric": 10,
   "cached_dataloader": "False",
   "data_loader_type": "",
-  "jannach_width": 0.2,
+  "jannach_width": "2.25",
   "beta_sampling": 0.75,
   "regularizer": "",
-  "reg_weight": "0.24",
+  "reg_weight": "0.12",
   "pc_weight": 0.2,
-  "soup_weight": 0.0,
-  "seed": 12121995
+  "soup_weight": "0.40",
+  "seed": 100362,
+  "dir_name": "baseline_100362"
 }
